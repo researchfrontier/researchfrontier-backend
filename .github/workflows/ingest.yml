@@ -33,9 +33,30 @@ jobs:
           RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
           RF_DEMO_RELATIVE_DATES: "false"
         run: python -m app.jobs.ingest --days "${{ github.event.inputs.days || '7' }}"
-      - name: Sync aggregate stats (true counts for ranking/directions)
+      - name: Sync aggregate stats (true counts; also appends Trends history)
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
           RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
         run: python -m app.jobs.sync_stats
+
+      - name: Sync field rankings (most-cited + institutions/countries, round-robin third)
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+        run: |
+          OFFSET=$(( ($(date +%j | sed 's/^0*//') % 3) * 84 ))
+          python -m app.jobs.sync_rankings --limit 84 --offset "$OFFSET"
+
+      - name: Seed yearly output curves (monthly, or on a manual run)
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+        run: |
+          if [ "$(date +%d)" = "01" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python -m app.jobs.sync_year_counts
+          else
+            echo "skip year-counts (not the 1st and not a manual run)"
+          fi

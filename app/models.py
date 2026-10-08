@@ -154,6 +154,54 @@ class TopicStats(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SubfieldStatsHistory(Base):
+    __tablename__ = "subfield_stats_history"
+    subfield_id: Mapped[int] = mapped_column(ForeignKey("subfield.id"), primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    works_7d: Mapped[int] = mapped_column(BigInteger, default=0)
+    works_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+    works_prev_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class TopicStatsHistory(Base):
+    __tablename__ = "topic_stats_history"
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topic.id"), primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    works_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class SubfieldYearCount(Base):
+    __tablename__ = "subfield_year_counts"
+    subfield_id: Mapped[int] = mapped_column(ForeignKey("subfield.id"), primary_key=True)
+    publication_year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    works_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SubfieldTopCited(Base):
+    __tablename__ = "subfield_top_cited"
+    subfield_id: Mapped[int] = mapped_column(ForeignKey("subfield.id"), primary_key=True)
+    rank: Mapped[int] = mapped_column(Integer, primary_key=True)
+    openalex_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(Text)
+    doi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    landing_page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cited_by_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SubfieldRanking(Base):
+    __tablename__ = "subfield_ranking"
+    subfield_id: Mapped[int] = mapped_column(ForeignKey("subfield.id"), primary_key=True)
+    dimension: Mapped[str] = mapped_column(Text, primary_key=True)
+    rank: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_key: Mapped[str] = mapped_column(Text)
+    entity_name: Mapped[str] = mapped_column(Text)
+    works_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Digest(Base):
     __tablename__ = "digest"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

@@ -198,6 +198,71 @@ async def group_counts(
     return out, payload.get("meta", {}).get("count", 0)
 
 
+async def group_raw(
+    client: httpx.AsyncClient,
+    *,
+    group_by: str,
+    from_date: date,
+    to_date: date | None = None,
+    extra_filter: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Return raw group_by buckets ``[{key, name, count}]`` (up to 200) for a works
+    query. Unlike ``group_counts`` this keeps the key's display name and non-numeric
+    keys (country codes, institution ids), so it suits institution/country rankings.
+
+    NOTE: never pass a small ``per-page`` here — in the metered API it truncates the
+    number of group_by buckets returned. We request 200 (one credit regardless)."""
+    if to_date is None:
+        to_date = date.today()
+    filters = [
+        f"from_publication_date:{from_date.isoformat()}",
+        f"to_publication_date:{to_date.isoformat()}",
+        f"type:{SCHOLARLY_TYPES}",
+    ]
+    if extra_filter:
+        filters.append(extra_filter)
+    resp = await client.get(
+        "/works",
+        params={"filter": ",".join(filters), "group_by": group_by, "per-page": 200, **_auth_params()},
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    out: list[dict[str, Any]] = []
+    for g in payload.get("group_by", []):
+        if not g.get("key"):
+            continue
+        out.append({"key": g.get("key"), "name": g.get("key_display_name"), "count": g.get("count", 0)})
+    return out[:limit]
+
+
+async def search_institutions(
+    client: httpx.AsyncClient, *, query: str, limit: int = 8
+) -> list[dict[str, Any]]:
+    """Search OpenAlex institutions by name -> ``[{id, name, country_code}]`` (``id``
+    is the short OpenAlex id, e.g. ``I27837315``)."""
+    resp = await client.get(
+        "/institutions",
+        params={"search": query, "per-page": min(25, limit), **_auth_params()},
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    out: list[dict[str, Any]] = []
+    for inst in payload.get("results", [])[:limit]:
+        iid = (inst.get("id") or "").rsplit("/", 1)[-1]
+        if not iid:
+            continue
+        out.append(
+            {
+                "id": iid,
+                "name": inst.get("display_name"),
+                "country_code": inst.get("country_code"),
+                "works_count": inst.get("works_count", 0),
+            }
+        )
+    return out
+
+
 def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw OpenAlex work into our normalized shape (+ derived badge)."""
     primary = raw.get("primary_location") or {}

@@ -132,6 +132,81 @@ class LimitsOut(BaseModel):
     services: list[ServiceLimit] = []
 
 
+class TrendYearPoint(BaseModel):
+    year: int
+    count: int
+
+
+class TrendField(BaseModel):
+    subfield_id: int
+    subfield_name: str
+    field_name: str | None = None
+    domain_name: str | None = None
+    count_30d: int = 0
+    prev_30d: int = 0
+    momentum: float = 0.0
+    years: list[TrendYearPoint] = []
+
+
+class TrendHotOut(BaseModel):
+    fields: list[TrendField] = []
+
+
+class TrendRankItem(BaseModel):
+    rank: int
+    name: str
+    key: str
+    count: int
+
+
+class TrendCitedItem(BaseModel):
+    rank: int
+    title: str
+    doi: str | None = None
+    url: str | None = None
+    cited_by_count: int = 0
+    year: int | None = None
+
+
+class TrendMomentumPoint(BaseModel):
+    date: date
+    works_30d: int
+
+
+class TrendTopic(BaseModel):
+    topic_id: int
+    topic_name: str
+    count: int
+
+
+class TrendFieldDetail(BaseModel):
+    subfield: Breadcrumb
+    years: list[TrendYearPoint] = []
+    momentum: list[TrendMomentumPoint] = []
+    top_topics: list[TrendTopic] = []
+    most_cited: list[TrendCitedItem] = []
+    institutions: list[TrendRankItem] = []
+    countries: list[TrendRankItem] = []
+
+
+class InstitutionHit(BaseModel):
+    id: str
+    name: str | None = None
+    country_code: str | None = None
+    works_count: int = 0
+
+
+class InstitutionFieldItem(BaseModel):
+    subfield_id: int | None = None
+    name: str | None = None
+    count: int = 0
+
+
+class InstitutionFieldsOut(BaseModel):
+    id: str
+    fields: list[InstitutionFieldItem] = []
+
+
 class DigestOut(BaseModel):
     subfield: Breadcrumb
     edition_date: date

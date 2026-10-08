@@ -21,7 +21,13 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from ..db import SessionLocal
-from ..models import Subfield, SubfieldStats, TopicStats
+from ..models import (
+    Subfield,
+    SubfieldStats,
+    SubfieldStatsHistory,
+    TopicStats,
+    TopicStatsHistory,
+)
 from ..sources import openalex
 
 
@@ -92,7 +98,39 @@ async def main() -> None:
             )
             await session.execute(stmt)
         await session.commit()
-        print("stats sync complete")
+
+        # 4) Append today's snapshot into the append-only history tables (Trends
+        # momentum accrues forward). Idempotent: a same-day rerun changes nothing.
+        sf_hist = (
+            insert(SubfieldStatsHistory)
+            .from_select(
+                ["subfield_id", "snapshot_date", "works_7d", "works_30d", "works_prev_30d"],
+                select(
+                    SubfieldStats.subfield_id,
+                    func.current_date().label("snapshot_date"),
+                    SubfieldStats.works_7d,
+                    SubfieldStats.works_30d,
+                    SubfieldStats.works_prev_30d,
+                ),
+            )
+            .on_conflict_do_nothing(index_elements=["subfield_id", "snapshot_date"])
+        )
+        await session.execute(sf_hist)
+        tp_hist = (
+            insert(TopicStatsHistory)
+            .from_select(
+                ["topic_id", "snapshot_date", "works_30d"],
+                select(
+                    TopicStats.topic_id,
+                    func.current_date().label("snapshot_date"),
+                    TopicStats.works_30d,
+                ),
+            )
+            .on_conflict_do_nothing(index_elements=["topic_id", "snapshot_date"])
+        )
+        await session.execute(tp_hist)
+        await session.commit()
+        print("stats sync complete (history appended)")
 
 
 if __name__ == "__main__":
