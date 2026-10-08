@@ -108,6 +108,24 @@ class DomainNode(BaseModel):
     fields: list[FieldNode] = []
 
 
+class LimitItem(BaseModel):
+    label: str
+    now: str = "—"       # current/live value where safely available, else "—"
+    limit: str           # the free-plan limit (documented)
+    live: bool = False    # true when `now` is a live measurement
+
+
+class ServiceLimit(BaseModel):
+    service: str
+    plan: str
+    items: list[LimitItem] = []
+    note: str | None = None
+
+
+class LimitsOut(BaseModel):
+    services: list[ServiceLimit] = []
+
+
 class DigestOut(BaseModel):
     subfield: Breadcrumb
     edition_date: date

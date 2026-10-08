@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .config import get_settings
-from .routers import fields, papers, taxonomy, topics
+from .routers import fields, limits, papers, taxonomy, topics
 
 settings = get_settings()
 
@@ -34,6 +34,7 @@ app.include_router(taxonomy.router)
 app.include_router(fields.router)
 app.include_router(papers.router)
 app.include_router(topics.router)
+app.include_router(limits.router)
 
 
 @app.get("/health", tags=["meta"])
