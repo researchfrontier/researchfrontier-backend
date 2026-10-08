@@ -19,6 +19,13 @@ from ..services.badges import compute_badge
 
 settings = get_settings()
 
+# Count/ingest only genuine scholarly outputs. Excludes dataset / software / other /
+# paratext, which OpenAlex sometimes bulk-indexes in huge batches (e.g. a ~2M-record
+# physics dataset release) that would otherwise distort recent counts and rankings.
+SCHOLARLY_TYPES = (
+    "article|preprint|review|conference-paper|book-chapter|book|dissertation|report|letter"
+)
+
 
 def _auth_params() -> dict[str, str]:
     params: dict[str, str] = {}
@@ -116,6 +123,7 @@ async def fetch_recent_works(
     filters = [
         f"from_publication_date:{from_date.isoformat()}",
         f"to_publication_date:{to_date.isoformat()}",
+        f"type:{SCHOLARLY_TYPES}",
     ]
     if subfield_oaid:
         filters.append(f"primary_topic.subfield.id:{oaid_to_int(subfield_oaid)}")
@@ -161,6 +169,7 @@ async def group_counts(
     filters = [
         f"from_publication_date:{from_date.isoformat()}",
         f"to_publication_date:{to_date.isoformat()}",
+        f"type:{SCHOLARLY_TYPES}",
     ]
     if extra_filter:
         filters.append(extra_filter)
