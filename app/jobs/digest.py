@@ -55,13 +55,19 @@ async def _build_for_subfield(session, sid: int, sname: str, ref: date, window: 
         topic_names = [name_map[t] for t in top_topic_ids if t in name_map]
 
     work_ids = [wid for wid, *_ in works][:10]
-    headline = f"{len(works)} new work{'s' if len(works) != 1 else ''} in {sname}"
+    # Headline the number of works actually featured (what the UI shows), not the whole
+    # window's volume — otherwise the brief reads "50 works" while listing 10. The total
+    # volume is kept in the summary and stats.
+    featured = len(work_ids)
+    total = len(works)
+    headline = f"{featured} notable work{'s' if featured != 1 else ''} in {sname}"
+    volume = f"{total} new work{'s' if total != 1 else ''} this window"
     summary = (
-        "Leading directions: " + ", ".join(topic_names) + "."
+        f"{volume} · leading directions: " + ", ".join(topic_names) + "."
         if topic_names
-        else f"Fresh activity in {sname}."
+        else f"{volume} in {sname}."
     )
-    stats = {"by_status": by_status, "count": len(works), "directions": topic_names}
+    stats = {"by_status": by_status, "count": total, "featured": featured, "directions": topic_names}
 
     stmt = (
         insert(Digest)
