@@ -133,8 +133,13 @@ async def main() -> None:
                 continue
             for raw_work in raw:
                 rec = openalex.normalize_work(raw_work)
-                if await _upsert_work(session, maps, rec) is not None:
-                    total += 1
+                try:
+                    async with session.begin_nested():  # savepoint: isolate bad rows
+                        wid = await _upsert_work(session, maps, rec)
+                    if wid is not None:
+                        total += 1
+                except Exception as exc:  # noqa: BLE001 — skip one row, keep going
+                    print(f"[skip] {rec.get('openalex_id')}: {exc}")
             await session.commit()
             print(f"subfield {sid}: ingested {len(raw)} works")
         print(f"ingest complete: {total} works upserted")

@@ -9,6 +9,7 @@ preprints. DOIs are the automatic DataCite form ``10.48550/arXiv.<id>``.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from datetime import date
 from typing import Any
 
 import httpx
@@ -67,7 +68,7 @@ def _parse_atom(xml_text: str) -> list[dict[str, Any]]:
                 "title": " ".join((entry.findtext(f"{ATOM}title") or "").split()),
                 "abstract": " ".join((entry.findtext(f"{ATOM}summary") or "").split()),
                 "authors": authors,
-                "publication_date": published,
+                "publication_date": date.fromisoformat(published) if published else None,
                 "publication_year": int(published[:4]) if published else None,
                 "language": "en",
                 "cited_by_count": 0,

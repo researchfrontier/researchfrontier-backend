@@ -55,6 +55,16 @@ def normalize_doi(doi: str | None) -> str | None:
     return doi.replace("https://doi.org/", "").replace("http://doi.org/", "").strip().lower() or None
 
 
+def parse_date(value: str | None) -> date | None:
+    """OpenAlex ships dates as 'YYYY-MM-DD' strings; asyncpg needs a date object."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except (TypeError, ValueError):
+        return None
+
+
 def reconstruct_abstract(inverted_index: dict[str, list[int]] | None) -> str | None:
     """OpenAlex ships abstracts as an inverted index to respect copyright; rebuild it."""
     if not inverted_index:
@@ -167,7 +177,7 @@ def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
         "title": raw.get("title") or raw.get("display_name") or "(untitled)",
         "abstract": reconstruct_abstract(raw.get("abstract_inverted_index")),
         "authors": authors,
-        "publication_date": raw.get("publication_date"),
+        "publication_date": parse_date(raw.get("publication_date")),
         "publication_year": raw.get("publication_year"),
         "language": raw.get("language"),
         "cited_by_count": raw.get("cited_by_count", 0),
