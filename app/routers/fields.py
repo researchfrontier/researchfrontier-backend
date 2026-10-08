@@ -24,34 +24,33 @@ router = APIRouter(prefix="/api/fields", tags=["fields"])
 # A "field" in the product == an OpenAlex subfield (a specific research area).
 
 
-@router.get("/hot", response_model=list[HotField])
-async def hot_fields(
-    window: int = Query(30, ge=1, le=365, description="kept for compatibility; hot is 30-day"),
-    limit: int = Query(12, ge=1, le=300),
-    session: AsyncSession = Depends(get_session),
+async def _ranked_fields(
+    session: AsyncSession, *, limit: int, ascending: bool, require_positive: bool
 ) -> list[HotField]:
-    """The hottest research fields now: ranked by TRUE recent output (last 30 days,
-    from OpenAlex counts), with momentum vs the previous 30 days. Reads
-    subfield_stats, not the stored paper sample."""
-    rows = (
-        await session.execute(
-            select(
-                SubfieldStats.subfield_id,
-                SubfieldStats.works_30d,
-                SubfieldStats.works_prev_30d,
-                Subfield.display_name,
-                Field.id,
-                Field.display_name,
-                Domain.display_name,
-            )
-            .join(Subfield, Subfield.id == SubfieldStats.subfield_id)
-            .join(Field, Subfield.field_id == Field.id)
-            .join(Domain, Field.domain_id == Domain.id)
-            .where(SubfieldStats.works_30d > 0)
-            .order_by(SubfieldStats.works_30d.desc())
-            .limit(limit)
+    """Rank fields by TRUE recent output (last 30 days, from subfield_stats — not the
+    stored paper sample). ``ascending`` flips hottest <-> coldest; ties break by name
+    so the list is stable. ``require_positive`` keeps un-measured/silent fields out of
+    the hot list while letting the cold list surface the genuinely quiet ones."""
+    order = SubfieldStats.works_30d.asc() if ascending else SubfieldStats.works_30d.desc()
+    query = (
+        select(
+            SubfieldStats.subfield_id,
+            SubfieldStats.works_30d,
+            SubfieldStats.works_prev_30d,
+            Subfield.display_name,
+            Field.id,
+            Field.display_name,
+            Domain.display_name,
         )
-    ).all()
+        .join(Subfield, Subfield.id == SubfieldStats.subfield_id)
+        .join(Field, Subfield.field_id == Field.id)
+        .join(Domain, Field.domain_id == Domain.id)
+    )
+    if require_positive:
+        query = query.where(SubfieldStats.works_30d > 0)
+    query = query.order_by(order, Subfield.display_name.asc()).limit(limit)
+
+    rows = (await session.execute(query)).all()
 
     out: list[HotField] = []
     for sid, w30, wprev, sname, fid, fname, dname in rows:
@@ -71,6 +70,29 @@ async def hot_fields(
             )
         )
     return out
+
+
+@router.get("/hot", response_model=list[HotField])
+async def hot_fields(
+    window: int = Query(30, ge=1, le=365, description="kept for compatibility; hot is 30-day"),
+    limit: int = Query(12, ge=1, le=300),
+    session: AsyncSession = Depends(get_session),
+) -> list[HotField]:
+    """The hottest research fields now: ranked by TRUE recent output (last 30 days,
+    from OpenAlex counts), with momentum vs the previous 30 days. Reads
+    subfield_stats, not the stored paper sample."""
+    return await _ranked_fields(session, limit=limit, ascending=False, require_positive=True)
+
+
+@router.get("/cold", response_model=list[HotField])
+async def cold_fields(
+    limit: int = Query(12, ge=1, le=300),
+    session: AsyncSession = Depends(get_session),
+) -> list[HotField]:
+    """The coldest research fields now: the quietest areas by TRUE recent output (last
+    30 days). Same shape as /hot but ranked ascending, and it keeps fields with zero
+    recent works — those are precisely the cold ones."""
+    return await _ranked_fields(session, limit=limit, ascending=True, require_positive=False)
 
 
 @router.get("/{subfield_id}/papers", response_model=PaperList)
