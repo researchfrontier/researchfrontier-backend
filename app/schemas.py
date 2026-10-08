@@ -45,7 +45,8 @@ class PaperList(BaseModel):
     subfield: Breadcrumb
     window_days: int
     reference_date: date
-    total: int
+    total: int                 # papers in the stored feed sample (what we return)
+    total_available: int = 0   # true count in the field for this window (OpenAlex)
     papers: list[PaperOut]
 
 

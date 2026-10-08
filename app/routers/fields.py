@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..models import Domain, Field, Subfield, Topic, Work
+from ..models import Domain, Field, Subfield, SubfieldStats, Topic, TopicStats, Work
 from ..schemas import (
     DigestOut,
     DirectionOut,
@@ -25,54 +25,37 @@ router = APIRouter(prefix="/api/fields", tags=["fields"])
 
 @router.get("/hot", response_model=list[HotField])
 async def hot_fields(
-    window: int = Query(30, ge=1, le=365),
+    window: int = Query(30, ge=1, le=365, description="kept for compatibility; hot is 30-day"),
     limit: int = Query(12, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> list[HotField]:
-    """The hottest research fields right now: most recent output, ranked with a
-    momentum signal (growth vs the previous equal-length window)."""
-    ref = await reference_date(session)
-    start = ref - timedelta(days=window)
-    prev_start = ref - timedelta(days=2 * window)
-
-    async def counts(lo, hi):
-        rows = (
-            await session.execute(
-                select(Work.primary_subfield_id, func.count())
-                .where(
-                    Work.primary_subfield_id.is_not(None),
-                    Work.publication_date > lo,
-                    Work.publication_date <= hi,
-                )
-                .group_by(Work.primary_subfield_id)
-            )
-        ).all()
-        return {sid: c for sid, c in rows}
-
-    cur = await counts(start, ref)
-    prev = await counts(prev_start, start)
-    if not cur:
-        return []
-
-    meta_rows = (
+    """The hottest research fields now: ranked by TRUE recent output (last 30 days,
+    from OpenAlex counts), with momentum vs the previous 30 days. Reads
+    subfield_stats, not the stored paper sample."""
+    rows = (
         await session.execute(
             select(
-                Subfield.id,
+                SubfieldStats.subfield_id,
+                SubfieldStats.works_30d,
+                SubfieldStats.works_prev_30d,
                 Subfield.display_name,
                 Field.id,
                 Field.display_name,
                 Domain.display_name,
             )
+            .join(Subfield, Subfield.id == SubfieldStats.subfield_id)
             .join(Field, Subfield.field_id == Field.id)
             .join(Domain, Field.domain_id == Domain.id)
-            .where(Subfield.id.in_(cur.keys()))
+            .where(SubfieldStats.works_30d > 0)
+            .order_by(SubfieldStats.works_30d.desc())
+            .limit(limit)
         )
     ).all()
 
     out: list[HotField] = []
-    for sid, sname, fid, fname, dname in meta_rows:
-        c = cur.get(sid, 0)
-        p = prev.get(sid, 0)
+    for sid, w30, wprev, sname, fid, fname, dname in rows:
+        w30, wprev = int(w30), int(wprev)
+        delta = w30 - wprev
         out.append(
             HotField(
                 subfield_id=sid,
@@ -80,14 +63,13 @@ async def hot_fields(
                 field_id=fid,
                 field_name=fname,
                 domain_name=dname,
-                count=c,
-                prev_count=p,
-                delta=c - p,
-                momentum=round((c - p) / p, 3) if p else float(c),
+                count=w30,
+                prev_count=wprev,
+                delta=delta,
+                momentum=round(delta / wprev, 3) if wprev else float(w30),
             )
         )
-    out.sort(key=lambda h: (h.count, h.momentum), reverse=True)
-    return out[:limit]
+    return out
 
 
 @router.get("/{subfield_id}/papers", response_model=PaperList)
@@ -125,11 +107,18 @@ async def field_papers(
 
     papers = [work_to_paper(w, tname) for w, tname in rows]
     bc = await get_breadcrumb(session, subfield_id)
+
+    # True number of recent papers in this field (from OpenAlex), so the feed can
+    # show "N of TOTAL" rather than implying the stored sample is everything.
+    stats = await session.get(SubfieldStats, subfield_id)
+    total_available = total if stats is None else int(stats.works_7d if window <= 7 else stats.works_30d)
+
     return PaperList(
         subfield=bc,
         window_days=window,
         reference_date=ref,
         total=total,
+        total_available=total_available,
         papers=papers,
     )
 
@@ -140,55 +129,36 @@ async def field_directions(
     window: int = Query(30, ge=1, le=365),
     session: AsyncSession = Depends(get_session),
 ) -> DirectionsOut:
-    """Where the field is moving: its topics ranked by recent output, with the
-    change vs the previous window (the "emerging directions" signal)."""
+    """Where the field is moving: its topics ranked by TRUE recent output (last 30
+    days, from OpenAlex counts in topic_stats), not by the stored paper sample."""
     ref = await reference_date(session)
-    start = ref - timedelta(days=window)
-    prev_start = ref - timedelta(days=2 * window)
 
-    async def counts(lo, hi):
-        rows = (
-            await session.execute(
-                select(Work.primary_topic_id, func.count())
-                .where(
-                    Work.primary_subfield_id == subfield_id,
-                    Work.primary_topic_id.is_not(None),
-                    Work.publication_date > lo,
-                    Work.publication_date <= hi,
-                )
-                .group_by(Work.primary_topic_id)
-            )
-        ).all()
-        return {tid: c for tid, c in rows}
-
-    cur = await counts(start, ref)
-    prev = await counts(prev_start, start)
-    total = sum(cur.values())
-
-    topics = (
-        await session.scalars(select(Topic).where(Topic.subfield_id == subfield_id))
-    ).all()
-    tmap = {t.id: t for t in topics}
-
-    directions: list[DirectionOut] = []
-    for tid, c in cur.items():
-        t = tmap.get(tid)
-        directions.append(
-            DirectionOut(
-                topic_id=tid,
-                topic_name=t.display_name if t else f"Topic {tid}",
-                count=c,
-                share=round(c / total, 3) if total else 0.0,
-                delta=c - prev.get(tid, 0),
-                keywords=(t.keywords if t else []) or [],
-            )
+    rows = (
+        await session.execute(
+            select(Topic.id, Topic.display_name, Topic.keywords, TopicStats.works_30d)
+            .join(TopicStats, TopicStats.topic_id == Topic.id)
+            .where(Topic.subfield_id == subfield_id, TopicStats.works_30d > 0)
+            .order_by(TopicStats.works_30d.desc())
         )
-    directions.sort(key=lambda d: (d.count, d.delta), reverse=True)
+    ).all()
+
+    total = sum(int(r[3]) for r in rows)
+    directions = [
+        DirectionOut(
+            topic_id=tid,
+            topic_name=name,
+            count=int(c),
+            share=round(c / total, 3) if total else 0.0,
+            delta=0,  # per-topic momentum not tracked yet
+            keywords=(kw or []),
+        )
+        for tid, name, kw, c in rows
+    ]
 
     bc = await get_breadcrumb(session, subfield_id)
     return DirectionsOut(
         subfield=bc,
-        window_days=window,
+        window_days=30,
         reference_date=ref,
         total=total,
         directions=directions,

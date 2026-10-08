@@ -136,6 +136,22 @@ class WorkTopic(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class SubfieldStats(Base):
+    __tablename__ = "subfield_stats"
+    subfield_id: Mapped[int] = mapped_column(ForeignKey("subfield.id"), primary_key=True)
+    works_7d: Mapped[int] = mapped_column(BigInteger, default=0)
+    works_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+    works_prev_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TopicStats(Base):
+    __tablename__ = "topic_stats"
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topic.id"), primary_key=True)
+    works_30d: Mapped[int] = mapped_column(BigInteger, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Digest(Base):
     __tablename__ = "digest"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

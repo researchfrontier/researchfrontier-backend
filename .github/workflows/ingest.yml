@@ -33,3 +33,9 @@ jobs:
           RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
           RF_DEMO_RELATIVE_DATES: "false"
         run: python -m app.jobs.ingest --days "${{ github.event.inputs.days || '7' }}"
+      - name: Sync aggregate stats (true counts for ranking/directions)
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+        run: python -m app.jobs.sync_stats

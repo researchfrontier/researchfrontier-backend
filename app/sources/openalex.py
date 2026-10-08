@@ -142,6 +142,42 @@ async def fetch_recent_works(
     return results[:max_results]
 
 
+async def group_counts(
+    client: httpx.AsyncClient,
+    *,
+    group_by: str,
+    from_date: date,
+    to_date: date | None = None,
+    extra_filter: str | None = None,
+) -> tuple[dict[int, int], int]:
+    """Return ``({entity_id: count}, total)`` for works in a date range, grouped by
+    an entity (e.g. 'primary_topic.subfield.id' or 'primary_topic.id').
+
+    group_by returns the top ~200 groups; for subfields (252) the long tail is the
+    least active and irrelevant to ranking. For a single subfield's topics it
+    returns them all. ``total`` is the exact matching-work count (meta.count)."""
+    if to_date is None:
+        to_date = date.today()
+    filters = [
+        f"from_publication_date:{from_date.isoformat()}",
+        f"to_publication_date:{to_date.isoformat()}",
+    ]
+    if extra_filter:
+        filters.append(extra_filter)
+    resp = await client.get(
+        "/works",
+        params={"filter": ",".join(filters), "group_by": group_by, "per-page": 200, **_auth_params()},
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    out: dict[int, int] = {}
+    for g in payload.get("group_by", []):
+        key = oaid_to_int(g.get("key", ""))
+        if key is not None:
+            out[key] = g.get("count", 0)
+    return out, payload.get("meta", {}).get("count", 0)
+
+
 def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw OpenAlex work into our normalized shape (+ derived badge)."""
     primary = raw.get("primary_location") or {}
