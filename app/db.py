@@ -31,7 +31,9 @@ def _prepare_url(raw: str) -> tuple[str, dict]:
     want_ssl = settings.db_ssl
     if query.pop("sslmode", None) not in (None, "disable"):
         want_ssl = True
+    # Drop libpq-only params asyncpg doesn't accept as connect kwargs.
     query.pop("ssl", None)  # let connect_args drive it
+    query.pop("channel_binding", None)
 
     url = urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
     connect_args = {"ssl": True} if want_ssl else {}
