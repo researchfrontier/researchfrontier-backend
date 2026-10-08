@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..models import Topic, TopicStats
 from ..schemas import TopicPapers
-from ..services.papers import live_papers
+from ..services.papers import stored_papers
 from ..services.serialize import get_breadcrumb
+from ..services.time_window import reference_date
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
@@ -24,14 +25,22 @@ async def topic_papers(
     limit: int = Query(50, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> TopicPapers:
-    """Recent papers for a single topic (the directions drill-down), fetched live
-    from OpenAlex and filtered by status / venue type / search."""
+    """Recent papers for a single topic (the directions drill-down), served from the
+    ingested store and filtered by status / venue type / search, newest first."""
     topic = await session.get(Topic, topic_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="topic not found")
 
-    papers, has_more = await live_papers(
-        topic_id=topic_id, window=window, status=status, venue=venue, search=search, limit=limit
+    ref = await reference_date(session)
+    papers, has_more = await stored_papers(
+        session,
+        topic_id=topic_id,
+        window=window,
+        status=status,
+        venue=venue,
+        search=search,
+        limit=limit,
+        ref=ref,
     )
     bc = await get_breadcrumb(session, topic.subfield_id)
     stats = await session.get(TopicStats, topic_id)

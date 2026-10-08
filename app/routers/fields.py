@@ -15,7 +15,7 @@ from ..schemas import (
     HotField,
     PaperList,
 )
-from ..services.papers import live_papers
+from ..services.papers import stored_papers
 from ..services.serialize import get_breadcrumb, work_to_paper
 from ..services.time_window import reference_date
 
@@ -105,12 +105,20 @@ async def field_papers(
     limit: int = Query(50, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> PaperList:
-    """Recent papers in a field — fetched live from OpenAlex (filtered by status,
-    optional venue type, and optional full-text search), so the list is complete and
-    searchable rather than a small stored sample. `total_available` is the field's true
-    count for the window."""
-    papers, has_more = await live_papers(
-        subfield_id=subfield_id, window=window, status=status, venue=venue, search=search, limit=limit
+    """Recent papers in a field — served from the ingested store (filtered by status,
+    optional venue type, and optional title/abstract search), newest first. Stable and
+    reproducible across requests. `total_available` is the field's true count for the
+    window (from OpenAlex counts), shown for context."""
+    ref = await reference_date(session)
+    papers, has_more = await stored_papers(
+        session,
+        subfield_id=subfield_id,
+        window=window,
+        status=status,
+        venue=venue,
+        search=search,
+        limit=limit,
+        ref=ref,
     )
     bc = await get_breadcrumb(session, subfield_id)
     stats = await session.get(SubfieldStats, subfield_id)
@@ -118,7 +126,7 @@ async def field_papers(
     return PaperList(
         subfield=bc,
         window_days=window,
-        reference_date=date.today(),
+        reference_date=ref,
         total=len(papers),
         total_available=total_available,
         has_more=has_more,

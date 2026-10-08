@@ -28,6 +28,3 @@ class TTLCache:
                     self._store.pop(next(iter(self._store)), None)
             self._store[key] = (now + self.ttl, value)
         return value
-
-
-papers_cache = TTLCache(ttl=900.0)

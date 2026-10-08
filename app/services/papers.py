@@ -1,26 +1,22 @@
-"""Live paper lists fetched from OpenAlex (filtered, searchable), with a short TTL
-cache. Used for the field papers tab and the topic drill-down, where the small
-stored feed sample isn't enough to support search + status filtering well."""
+"""Paper lists served from the ingested ``work`` table in Postgres — status/venue
+filtered, searchable, paginated, newest first. Serving from the store (instead of a
+live OpenAlex call per visit) makes browsing fast, reliable, reproducible, and
+independent of the OpenAlex credit budget; the ingestion job keeps ``work`` fresh."""
 
 from __future__ import annotations
 
 from datetime import date, timedelta
 
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import Topic, Work
 from ..schemas import PaperOut
-from ..sources import openalex
-from .cache import papers_cache
-from .serialize import normalized_to_paper
-
-# Map a review-status filter to an OpenAlex work-type proxy, so the live query
-# returns enough of the requested kind before we refine by the derived badge.
-STATUS_TYPE_PROXY = {
-    "peer_reviewed": "article|review|book-chapter|conference-paper|book",
-    "preprint_published": "article|review",
-    "preprint": "preprint",
-}
+from .serialize import work_to_paper
 
 
-async def live_papers(
+async def stored_papers(
+    session: AsyncSession,
     *,
     subfield_id: int | None = None,
     topic_id: int | None = None,
@@ -29,58 +25,38 @@ async def live_papers(
     venue: str | None = None,
     search: str | None = None,
     limit: int = 50,
+    ref: date | None = None,
 ) -> tuple[list[PaperOut], bool]:
-    """Return ``(papers[:limit], has_more)``. ``has_more`` tells the UI whether asking
-    for a larger ``limit`` could surface more rows — which, under a status filter, is
-    NOT the same as ``len(papers) < limit`` (we over-fetch raw works and then drop the
-    ones whose derived badge doesn't match, so a short page can just mean the raw window
-    was too shallow). It's true when we already hold more matches than ``limit``, or when
-    the raw OpenAlex fetch hit its cap (more works remain to examine deeper)."""
-    status = status or None
-    if status == "all":
-        status = None
-    venue = venue or None
-    if venue == "all":
-        venue = None
-    key = (
-        f"sf={subfield_id}|tp={topic_id}|w={window}|s={status}|v={venue}"
-        f"|q={(search or '').strip().lower()}|l={limit}"
+    """Return ``(papers[:limit], has_more)`` for a field or topic, from stored works:
+    filtered by the recency window, derived review status, primary venue type, and an
+    optional title/abstract search, newest first (citations break ties). ``has_more``
+    is true when more than ``limit`` rows match, so the UI's "Load more" can grow the
+    page. The same request returns the same rows (stable, citable), unlike a live feed."""
+    status = status if status and status != "all" else None
+    venue = venue if venue and venue != "all" else None
+    ref = ref or date.today()
+    start = ref - timedelta(days=window)
+
+    q = (
+        select(Work, Topic.display_name)
+        .join(Topic, Work.primary_topic_id == Topic.id, isouter=True)
+        .where(Work.publication_date > start, Work.publication_date <= ref)
     )
+    if subfield_id is not None:
+        q = q.where(Work.primary_subfield_id == subfield_id)
+    if topic_id is not None:
+        q = q.where(Work.primary_topic_id == topic_id)
+    if status:
+        q = q.where(Work.review_status == status)
+    if venue:
+        q = q.where(Work.primary_source_type == venue)
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        q = q.where(or_(Work.title.ilike(like), Work.abstract.ilike(like)))
 
-    async def factory() -> tuple[list[PaperOut], bool]:
-        today = date.today()
-        frm = today - timedelta(days=window)
-        type_filter = STATUS_TYPE_PROXY.get(status) if status else None
-        # Venue (journal / conference / book series) filters at the OpenAlex query
-        # level via the primary location's source type, so the raw window is already
-        # narrowed to the requested venue before we refine by the derived badge.
-        extra_filter = (
-            f"primary_location.source.type:{venue}" if venue else None
-        )
-        # Over-fetch when a status is set, since we then refine by the derived badge.
-        over = limit if status is None else limit * 3
-        max_results = max(over, 80)
-        async with openalex.make_client() as client:
-            raw = await openalex.fetch_recent_works(
-                client,
-                from_date=frm,
-                to_date=today,
-                subfield_id=subfield_id,
-                topic_id=topic_id,
-                search=search,
-                type_filter=type_filter,
-                extra_filter=extra_filter,
-                max_results=max_results,
-            )
-        # Fewer raw works than we asked for => OpenAlex's cursor is exhausted, so no
-        # deeper fetch would help; otherwise more works remain to examine.
-        raw_exhausted = len(raw) < max_results
-        papers = [normalized_to_paper(openalex.normalize_work(r)) for r in raw]
-        if status:
-            papers = [p for p in papers if p.review_status == status]
-        if venue:
-            papers = [p for p in papers if p.primary_source_type == venue]
-        has_more = len(papers) > limit or not raw_exhausted
-        return papers[:limit], has_more
-
-    return await papers_cache.get_or_set(key, factory)
+    # Fetch one extra row to detect whether a larger page would surface more.
+    q = q.order_by(Work.publication_date.desc(), Work.cited_by_count.desc()).limit(limit + 1)
+    rows = (await session.execute(q)).all()
+    has_more = len(rows) > limit
+    papers = [work_to_paper(w, tname) for w, tname in rows[:limit]]
+    return papers, has_more
