@@ -77,6 +77,9 @@ async def get_breadcrumb(session: AsyncSession, subfield_id: int) -> Breadcrumb:
             select(
                 Subfield.id,
                 Subfield.display_name,
+                Subfield.description,
+                Subfield.wikipedia_url,
+                Subfield.wikidata_id,
                 Field.id,
                 Field.display_name,
                 Domain.id,
@@ -89,7 +92,10 @@ async def get_breadcrumb(session: AsyncSession, subfield_id: int) -> Breadcrumb:
     ).first()
     if not row:
         return Breadcrumb(subfield_id=subfield_id)
-    sid, sname, fid, fname, did, dname = row
+    sid, sname, sdesc, swiki, swd, fid, fname, did, dname = row
+    # A handful of stored Wikipedia URLs carry literal spaces; normalize to underscores
+    # so the link resolves.
+    wiki = swiki.replace(" ", "_") if swiki else None
     return Breadcrumb(
         domain_id=did,
         domain_name=dname,
@@ -97,4 +103,7 @@ async def get_breadcrumb(session: AsyncSession, subfield_id: int) -> Breadcrumb:
         field_name=fname,
         subfield_id=sid,
         subfield_name=sname,
+        subfield_description=sdesc,
+        subfield_wikipedia_url=wiki,
+        subfield_wikidata_id=swd,
     )

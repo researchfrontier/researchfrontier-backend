@@ -14,8 +14,9 @@ from ..schemas import (
     DirectionsOut,
     HotField,
     PaperList,
+    PaperOut,
 )
-from ..services.papers import live_papers
+from ..services.papers import live_papers, live_reviews
 from ..services.serialize import get_breadcrumb, work_to_paper
 from ..services.time_window import reference_date
 
@@ -100,15 +101,17 @@ async def field_papers(
     subfield_id: int,
     window: int = Query(30, ge=1, le=365),
     status: str | None = Query(None, description="peer_reviewed|preprint|preprint_published|retracted|all"),
+    venue: str | None = Query(None, description="journal|conference|book series — primary venue type"),
     search: str | None = Query(None, description="full-text query"),
     limit: int = Query(50, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> PaperList:
-    """Recent papers in a field — fetched live from OpenAlex (filtered by status and
-    optional full-text search), so the list is complete and searchable rather than a
-    small stored sample. `total_available` is the field's true count for the window."""
+    """Recent papers in a field — fetched live from OpenAlex (filtered by status,
+    optional venue type, and optional full-text search), so the list is complete and
+    searchable rather than a small stored sample. `total_available` is the field's true
+    count for the window."""
     papers, has_more = await live_papers(
-        subfield_id=subfield_id, window=window, status=status, search=search, limit=limit
+        subfield_id=subfield_id, window=window, status=status, venue=venue, search=search, limit=limit
     )
     bc = await get_breadcrumb(session, subfield_id)
     stats = await session.get(SubfieldStats, subfield_id)
@@ -122,6 +125,18 @@ async def field_papers(
         has_more=has_more,
         papers=papers,
     )
+
+
+@router.get("/{subfield_id}/reviews", response_model=list[PaperOut])
+async def field_reviews(
+    subfield_id: int,
+    limit: int = Query(3, ge=1, le=10),
+    session: AsyncSession = Depends(get_session),
+) -> list[PaperOut]:
+    """A few authoritative recent review articles for a field — entry points a
+    non-expert can start from, fetched live from OpenAlex (journal-venue reviews,
+    ranked by citations). May return fewer than `limit` where reviews are scarce."""
+    return await live_reviews(subfield_id=subfield_id, limit=limit)
 
 
 @router.get("/{subfield_id}/directions", response_model=DirectionsOut)

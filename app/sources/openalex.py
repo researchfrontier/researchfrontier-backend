@@ -112,6 +112,7 @@ async def fetch_recent_works(
     search: str | None = None,
     type_filter: str | None = None,
     extra_filter: str | None = None,
+    sort: str = "publication_date:desc",
     max_results: int = 200,
 ) -> list[dict[str, Any]]:
     """Fetch works published in a date range, restricted to a subfield or topic,
@@ -145,7 +146,7 @@ async def fetch_recent_works(
     while cursor and len(results) < max_results:
         params = {
             "filter": ",".join(filters),
-            "sort": "publication_date:desc",
+            "sort": sort,
             "per-page": min(200, max_results - len(results)),
             "cursor": cursor,
             **_auth_params(),

@@ -17,6 +17,10 @@ class Breadcrumb(BaseModel):
     field_name: str | None = None
     subfield_id: int | None = None
     subfield_name: str | None = None
+    # Per-field encyclopedic intro for non-experts (CC0 gloss + Wikipedia link).
+    subfield_description: str | None = None
+    subfield_wikipedia_url: str | None = None
+    subfield_wikidata_id: str | None = None
 
 
 class PaperOut(BaseModel):

@@ -65,6 +65,8 @@ class Subfield(Base):
     openalex_id: Mapped[str] = mapped_column(Text, unique=True)
     display_name: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wikipedia_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wikidata_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     field_id: Mapped[int] = mapped_column(ForeignKey("field.id"))
     works_count: Mapped[int] = mapped_column(BigInteger, default=0)
 

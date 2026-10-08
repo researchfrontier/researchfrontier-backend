@@ -52,6 +52,14 @@ async def _sync_level(session, client, entity, model, parent_key, parent_attr):
         if parent_key:
             parent = row.get(parent_key) or {}
             values[parent_attr] = openalex.oaid_to_int(parent.get("id", ""))
+        if model is Subfield:
+            # Encyclopedic intro link per field (shown to non-experts). ids.wikipedia is a
+            # canonical article URL; ids.wikidata is a permanent QID anchor (Q-number).
+            ids = row.get("ids") or {}
+            wiki = ids.get("wikipedia")
+            values["wikipedia_url"] = wiki.replace(" ", "_") if wiki else None
+            wd = ids.get("wikidata") or ""
+            values["wikidata_id"] = wd.rstrip("/").rsplit("/", 1)[-1] or None if wd else None
         if model is Topic:
             kws = row.get("keywords") or []
             values["keywords"] = [k if isinstance(k, str) else k.get("display_name", "") for k in kws]

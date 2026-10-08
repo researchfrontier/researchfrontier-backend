@@ -8,8 +8,12 @@ from datetime import date, timedelta
 
 from ..schemas import PaperOut
 from ..sources import openalex
-from .cache import papers_cache
+from .cache import papers_cache, reviews_cache
 from .serialize import normalized_to_paper
+
+# Titles that mark an individual book review rather than an orienting review article —
+# common in the humanities, where OpenAlex's type:review is noisy.
+_BOOK_REVIEW_PREFIXES = ("review of", "compte rendu", "book review", "reseña de")
 
 # Map a review-status filter to an OpenAlex work-type proxy, so the live query
 # returns enough of the requested kind before we refine by the derived badge.
@@ -26,6 +30,7 @@ async def live_papers(
     topic_id: int | None = None,
     window: int = 30,
     status: str | None = None,
+    venue: str | None = None,
     search: str | None = None,
     limit: int = 50,
 ) -> tuple[list[PaperOut], bool]:
@@ -38,8 +43,11 @@ async def live_papers(
     status = status or None
     if status == "all":
         status = None
+    venue = venue or None
+    if venue == "all":
+        venue = None
     key = (
-        f"sf={subfield_id}|tp={topic_id}|w={window}|s={status}"
+        f"sf={subfield_id}|tp={topic_id}|w={window}|s={status}|v={venue}"
         f"|q={(search or '').strip().lower()}|l={limit}"
     )
 
@@ -47,6 +55,12 @@ async def live_papers(
         today = date.today()
         frm = today - timedelta(days=window)
         type_filter = STATUS_TYPE_PROXY.get(status) if status else None
+        # Venue (journal / conference / book series) filters at the OpenAlex query
+        # level via the primary location's source type, so the raw window is already
+        # narrowed to the requested venue before we refine by the derived badge.
+        extra_filter = (
+            f"primary_location.source.type:{venue}" if venue else None
+        )
         # Over-fetch when a status is set, since we then refine by the derived badge.
         over = limit if status is None else limit * 3
         max_results = max(over, 80)
@@ -59,6 +73,7 @@ async def live_papers(
                 topic_id=topic_id,
                 search=search,
                 type_filter=type_filter,
+                extra_filter=extra_filter,
                 max_results=max_results,
             )
         # Fewer raw works than we asked for => OpenAlex's cursor is exhausted, so no
@@ -67,7 +82,45 @@ async def live_papers(
         papers = [normalized_to_paper(openalex.normalize_work(r)) for r in raw]
         if status:
             papers = [p for p in papers if p.review_status == status]
+        if venue:
+            papers = [p for p in papers if p.primary_source_type == venue]
         has_more = len(papers) > limit or not raw_exhausted
         return papers[:limit], has_more
 
     return await papers_cache.get_or_set(key, factory)
+
+
+def _is_book_review(paper: PaperOut) -> bool:
+    title = (paper.title or "").strip().lower()
+    return title.startswith(_BOOK_REVIEW_PREFIXES)
+
+
+async def live_reviews(*, subfield_id: int, limit: int = 3) -> list[PaperOut]:
+    """A few authoritative recent REVIEW articles for a field — entry points for a
+    non-expert, not the firehose feed. Derived from OpenAlex ``type:review`` restricted
+    to journal venues (excludes AI-generated repository "narrative review" dumps and
+    mis-typed book reviews), over a multi-year window, ranked by citations. Returns at
+    most ``limit`` papers (may be fewer where the genre genuinely doesn't exist)."""
+    key = f"reviews|sf={subfield_id}|l={limit}"
+
+    async def factory() -> list[PaperOut]:
+        today = date.today()
+        frm = today - timedelta(days=365 * 6)  # a ~6-year window; reviews age slowly
+        async with openalex.make_client() as client:
+            raw = await openalex.fetch_recent_works(
+                client,
+                from_date=frm,
+                to_date=today,
+                subfield_id=subfield_id,
+                type_filter="review",
+                extra_filter="primary_location.source.type:journal",
+                sort="cited_by_count:desc",
+                max_results=max(limit * 6, 24),
+            )
+        papers = [normalized_to_paper(openalex.normalize_work(r)) for r in raw]
+        papers = [p for p in papers if not _is_book_review(p)]
+        # Prefer DOI-bearing reviews (permanent, resolvable) while keeping citation order.
+        papers.sort(key=lambda p: 0 if p.doi else 1)
+        return papers[:limit]
+
+    return await reviews_cache.get_or_set(key, factory)
