@@ -18,6 +18,32 @@ from ..db import SessionLocal
 from ..models import Domain, Field, Subfield, Topic
 from ..sources import openalex
 
+# Curated corrections for subfield -> Wikipedia/Wikidata intro links. OpenAlex
+# mis-maps ~9-13% of subfields to a journal/book/disambiguation/narrower topic; these
+# overrides repoint the wrong ones and PERSIST across syncs (applied after the OpenAlex
+# pull). Extend from the `python -m app.jobs.qa_subfield_links` report.
+SUBFIELD_LINK_OVERRIDES: dict[int, dict[str, str]] = {
+    # Verified 2026-10-08 with app.jobs.qa_subfield_links (Wikidata P31) over all 252
+    # subfields: these mapped to a journal / book / company / disambiguation page, or a
+    # non-existent English article, or a wrong concept. Repointed to the field article.
+    2002: {"wikipedia_url": "https://en.wikipedia.org/wiki/Economics", "wikidata_id": "Q8134"},           # was "Econometrics"
+    3103: {"wikipedia_url": "https://en.wikipedia.org/wiki/Astronomy", "wikidata_id": "Q333"},            # was the journal "Astronomy and Astrophysics"
+    1802: {"wikipedia_url": "https://en.wikipedia.org/wiki/Information_system", "wikidata_id": "Q121182"}, # was a book
+    2100: {"wikipedia_url": "https://en.wikipedia.org/wiki/Energy", "wikidata_id": "Q11379"},             # was a Czech company
+    2103: {"wikipedia_url": "https://en.wikipedia.org/wiki/Fuel", "wikidata_id": "Q42501"},               # had no English article
+    2207: {"wikipedia_url": "https://en.wikipedia.org/wiki/Control_engineering", "wikidata_id": "Q4917288"},  # was a journal
+    2302: {"wikipedia_url": "https://en.wikipedia.org/wiki/Ecosystem_model", "wikidata_id": "Q295046"},   # had no English article
+    2712: {"wikipedia_url": "https://en.wikipedia.org/wiki/Endocrinology", "wikidata_id": "Q162606"},     # was a journal
+    2740: {"wikipedia_url": "https://en.wikipedia.org/wiki/Pulmonology", "wikidata_id": "Q203337"},       # was a journal
+    3303: {"wikipedia_url": "https://en.wikipedia.org/wiki/Development_studies", "wikidata_id": "Q651571"},  # was "Planned community"
+    3310: {"wikipedia_url": "https://en.wikipedia.org/wiki/Linguistics", "wikidata_id": "Q8162"},         # was a book
+    3311: {"wikipedia_url": "https://en.wikipedia.org/wiki/Safety", "wikidata_id": "Q10566551"},          # had no English article
+    3319: {"wikipedia_url": "https://en.wikipedia.org/wiki/Life_course_approach", "wikidata_id": "Q1811049"},  # was "lifetime"
+    3603: {"wikipedia_url": "https://en.wikipedia.org/wiki/Alternative_medicine", "wikidata_id": "Q188504"},   # had no English article
+    3607: {"wikipedia_url": "https://en.wikipedia.org/wiki/Medical_laboratory", "wikidata_id": "Q2296168"},    # had no English article
+    3616: {"wikipedia_url": "https://en.wikipedia.org/wiki/Speech-language_pathology"},                   # was a written work
+}
+
 
 async def _sync_level(session, client, entity, model, parent_key, parent_attr):
     batch: list[dict] = []
@@ -60,6 +86,13 @@ async def _sync_level(session, client, entity, model, parent_key, parent_attr):
             values["wikipedia_url"] = wiki.replace(" ", "_") if wiki else None
             wd = ids.get("wikidata") or ""
             values["wikidata_id"] = wd.rstrip("/").rsplit("/", 1)[-1] or None if wd else None
+            # Apply curated corrections for known OpenAlex mis-maps (persist across syncs).
+            override = SUBFIELD_LINK_OVERRIDES.get(oaid)
+            if override:
+                if override.get("wikipedia_url"):
+                    values["wikipedia_url"] = override["wikipedia_url"]
+                if override.get("wikidata_id"):
+                    values["wikidata_id"] = override["wikidata_id"]
         if model is Topic:
             kws = row.get("keywords") or []
             values["keywords"] = [k if isinstance(k, str) else k.get("display_name", "") for k in kws]

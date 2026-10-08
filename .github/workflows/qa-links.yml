@@ -1,0 +1,25 @@
+name: qa-subfield-links
+
+# Reports subfield -> Wikipedia/Wikidata intro links that point at the wrong target
+# (journal/book/disambiguation/company) via Wikidata P31. Read-only; prints a report
+# in the run log to curate into SUBFIELD_LINK_OVERRIDES. Needs the DB (all 252
+# subfields); no OpenAlex key required. Manual trigger.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qa-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: QA subfield intro links
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+        run: python -m app.jobs.qa_subfield_links
