@@ -107,13 +107,19 @@ async def fetch_recent_works(
     from_date: date,
     to_date: date | None = None,
     subfield_oaid: str | None = None,
+    subfield_id: int | None = None,
+    topic_id: int | None = None,
+    search: str | None = None,
+    type_filter: str | None = None,
     extra_filter: str | None = None,
     max_results: int = 200,
 ) -> list[dict[str, Any]]:
-    """Fetch works published in a date range, optionally restricted to a subfield.
+    """Fetch works published in a date range, restricted to a subfield or topic,
+    optionally full-text searched and narrowed to specific work types.
 
-    ``subfield_oaid`` is the OpenAlex subfield URL/id; we filter on
-    ``primary_topic.subfield.id`` so a work lands in exactly one field feed.
+    We filter on ``primary_topic.subfield.id`` / ``primary_topic.id`` so a work
+    lands in exactly one field/topic feed. ``type_filter`` overrides the default
+    scholarly-type allow-list (e.g. to approximate a peer-review status).
     """
     # Cap the upper bound at today: OpenAlex has many records with erroneous
     # future publication dates, and sort=publication_date:desc would otherwise let
@@ -123,26 +129,30 @@ async def fetch_recent_works(
     filters = [
         f"from_publication_date:{from_date.isoformat()}",
         f"to_publication_date:{to_date.isoformat()}",
-        f"type:{SCHOLARLY_TYPES}",
+        f"type:{type_filter or SCHOLARLY_TYPES}",
     ]
     if subfield_oaid:
         filters.append(f"primary_topic.subfield.id:{oaid_to_int(subfield_oaid)}")
+    elif subfield_id is not None:
+        filters.append(f"primary_topic.subfield.id:{subfield_id}")
+    if topic_id is not None:
+        filters.append(f"primary_topic.id:T{topic_id}")  # OpenAlex topic ids are T-prefixed
     if extra_filter:
         filters.append(extra_filter)
 
     results: list[dict[str, Any]] = []
     cursor = "*"
     while cursor and len(results) < max_results:
-        resp = await client.get(
-            "/works",
-            params={
-                "filter": ",".join(filters),
-                "sort": "publication_date:desc",
-                "per-page": min(200, max_results - len(results)),
-                "cursor": cursor,
-                **_auth_params(),
-            },
-        )
+        params = {
+            "filter": ",".join(filters),
+            "sort": "publication_date:desc",
+            "per-page": min(200, max_results - len(results)),
+            "cursor": cursor,
+            **_auth_params(),
+        }
+        if search:
+            params["search"] = search
+        resp = await client.get("/works", params=params)
         resp.raise_for_status()
         payload = resp.json()
         results.extend(payload.get("results", []))

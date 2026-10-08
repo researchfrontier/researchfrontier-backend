@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -15,6 +15,7 @@ from ..schemas import (
     HotField,
     PaperList,
 )
+from ..services.papers import live_papers
 from ..services.serialize import get_breadcrumb, work_to_paper
 from ..services.time_window import reference_date
 
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/api/fields", tags=["fields"])
 @router.get("/hot", response_model=list[HotField])
 async def hot_fields(
     window: int = Query(30, ge=1, le=365, description="kept for compatibility; hot is 30-day"),
-    limit: int = Query(12, ge=1, le=100),
+    limit: int = Query(12, ge=1, le=300),
     session: AsyncSession = Depends(get_session),
 ) -> list[HotField]:
     """The hottest research fields now: ranked by TRUE recent output (last 30 days,
@@ -76,48 +77,25 @@ async def hot_fields(
 async def field_papers(
     subfield_id: int,
     window: int = Query(30, ge=1, le=365),
-    status: str | None = Query(None, description="filter by review_status"),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    status: str | None = Query(None, description="peer_reviewed|preprint|preprint_published|retracted|all"),
+    search: str | None = Query(None, description="full-text query"),
+    limit: int = Query(50, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> PaperList:
-    ref = await reference_date(session)
-    start = ref - timedelta(days=window)
-
-    conds = [
-        Work.primary_subfield_id == subfield_id,
-        Work.publication_date > start,
-        Work.publication_date <= ref,
-    ]
-    if status:
-        conds.append(Work.review_status == status)
-
-    total = await session.scalar(select(func.count()).select_from(Work).where(*conds)) or 0
-
-    rows = (
-        await session.execute(
-            select(Work, Topic.display_name)
-            .join(Topic, Work.primary_topic_id == Topic.id, isouter=True)
-            .where(*conds)
-            .order_by(Work.publication_date.desc(), Work.cited_by_count.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-    ).all()
-
-    papers = [work_to_paper(w, tname) for w, tname in rows]
+    """Recent papers in a field — fetched live from OpenAlex (filtered by status and
+    optional full-text search), so the list is complete and searchable rather than a
+    small stored sample. `total_available` is the field's true count for the window."""
+    papers = await live_papers(
+        subfield_id=subfield_id, window=window, status=status, search=search, limit=limit
+    )
     bc = await get_breadcrumb(session, subfield_id)
-
-    # True number of recent papers in this field (from OpenAlex), so the feed can
-    # show "N of TOTAL" rather than implying the stored sample is everything.
     stats = await session.get(SubfieldStats, subfield_id)
-    total_available = total if stats is None else int(stats.works_7d if window <= 7 else stats.works_30d)
-
+    total_available = 0 if stats is None else int(stats.works_7d if window <= 7 else stats.works_30d)
     return PaperList(
         subfield=bc,
         window_days=window,
-        reference_date=ref,
-        total=total,
+        reference_date=date.today(),
+        total=len(papers),
         total_available=total_available,
         papers=papers,
     )

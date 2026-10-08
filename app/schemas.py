@@ -50,6 +50,15 @@ class PaperList(BaseModel):
     papers: list[PaperOut]
 
 
+class TopicPapers(BaseModel):
+    topic_id: int
+    topic_name: str
+    subfield: Breadcrumb
+    window_days: int
+    total_available: int = 0
+    papers: list[PaperOut] = []
+
+
 class DirectionOut(BaseModel):
     topic_id: int
     topic_name: str
