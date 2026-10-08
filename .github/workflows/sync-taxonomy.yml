@@ -1,0 +1,28 @@
+name: sync-taxonomy
+
+# Pulls the full OpenAlex taxonomy (domains → fields → subfields → topics) into the
+# database, including the per-subfield encyclopedic-intro links (wikipedia_url,
+# wikidata_id) and descriptions. Idempotent upsert; safe to re-run. Manual trigger —
+# run it after adding taxonomy columns or to refresh emerging fields.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-taxonomy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Sync taxonomy
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+          RF_DEMO_RELATIVE_DATES: "false"
+        run: python -m app.jobs.sync_taxonomy
