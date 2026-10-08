@@ -26,9 +26,12 @@ from ..schemas import (
     TrendCitedItem,
     TrendField,
     TrendFieldDetail,
+    TrendHistoryOut,
     TrendHotOut,
     TrendMomentumPoint,
     TrendRankItem,
+    TrendSeries,
+    TrendSeriesPoint,
     TrendTopic,
     TrendYearPoint,
 )
@@ -102,6 +105,48 @@ async def trends_hot(
             )
         )
     return TrendHotOut(fields=fields)
+
+
+@router.get("/history", response_model=TrendHistoryOut)
+async def trends_history(
+    limit: int = Query(6, ge=1, le=12),
+    session: AsyncSession = Depends(get_session),
+) -> TrendHistoryOut:
+    """Week-by-week output history for the current top fields — the multi-series line
+    chart of 'who's been hottest over time'. Reads the append-only history table, so it
+    fills in as weekly snapshots accrue (nearly empty at first)."""
+    top = (
+        await session.execute(
+            select(SubfieldStats.subfield_id, Subfield.display_name)
+            .join(Subfield, Subfield.id == SubfieldStats.subfield_id)
+            .where(SubfieldStats.works_30d > 0)
+            .order_by(SubfieldStats.works_30d.desc(), Subfield.display_name.asc())
+            .limit(limit)
+        )
+    ).all()
+    ids = [t[0] for t in top]
+    names = {t[0]: t[1] for t in top}
+    if not ids:
+        return TrendHistoryOut(series=[])
+    rows = (
+        await session.execute(
+            select(
+                SubfieldStatsHistory.subfield_id,
+                SubfieldStatsHistory.snapshot_date,
+                SubfieldStatsHistory.works_30d,
+            )
+            .where(SubfieldStatsHistory.subfield_id.in_(ids))
+            .order_by(SubfieldStatsHistory.subfield_id, SubfieldStatsHistory.snapshot_date)
+        )
+    ).all()
+    by_id: dict[int, list[TrendSeriesPoint]] = defaultdict(list)
+    for sid, dt, v in rows:
+        by_id[sid].append(TrendSeriesPoint(date=dt, value=int(v)))
+    series = [
+        TrendSeries(subfield_id=sid, name=names[sid], points=by_id.get(sid, []))
+        for sid in ids
+    ]
+    return TrendHistoryOut(series=series)
 
 
 @router.get("/fields/{subfield_id}", response_model=TrendFieldDetail)

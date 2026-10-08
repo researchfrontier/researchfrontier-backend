@@ -189,6 +189,21 @@ class TrendFieldDetail(BaseModel):
     countries: list[TrendRankItem] = []
 
 
+class TrendSeriesPoint(BaseModel):
+    date: date
+    value: int
+
+
+class TrendSeries(BaseModel):
+    subfield_id: int
+    name: str
+    points: list[TrendSeriesPoint] = []
+
+
+class TrendHistoryOut(BaseModel):
+    series: list[TrendSeries] = []
+
+
 class InstitutionHit(BaseModel):
     id: str
     name: str | None = None
