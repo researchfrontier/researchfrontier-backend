@@ -47,6 +47,7 @@ class PaperList(BaseModel):
     reference_date: date
     total: int                 # papers in the stored feed sample (what we return)
     total_available: int = 0   # true count in the field for this window (OpenAlex)
+    has_more: bool = False     # a larger limit could surface more rows (load-more)
     papers: list[PaperOut]
 
 
@@ -56,6 +57,7 @@ class TopicPapers(BaseModel):
     subfield: Breadcrumb
     window_days: int
     total_available: int = 0
+    has_more: bool = False     # a larger limit could surface more rows (load-more)
     papers: list[PaperOut] = []
 
 

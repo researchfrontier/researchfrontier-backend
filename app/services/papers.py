@@ -28,7 +28,13 @@ async def live_papers(
     status: str | None = None,
     search: str | None = None,
     limit: int = 50,
-) -> list[PaperOut]:
+) -> tuple[list[PaperOut], bool]:
+    """Return ``(papers[:limit], has_more)``. ``has_more`` tells the UI whether asking
+    for a larger ``limit`` could surface more rows — which, under a status filter, is
+    NOT the same as ``len(papers) < limit`` (we over-fetch raw works and then drop the
+    ones whose derived badge doesn't match, so a short page can just mean the raw window
+    was too shallow). It's true when we already hold more matches than ``limit``, or when
+    the raw OpenAlex fetch hit its cap (more works remain to examine deeper)."""
     status = status or None
     if status == "all":
         status = None
@@ -37,12 +43,13 @@ async def live_papers(
         f"|q={(search or '').strip().lower()}|l={limit}"
     )
 
-    async def factory() -> list[PaperOut]:
+    async def factory() -> tuple[list[PaperOut], bool]:
         today = date.today()
         frm = today - timedelta(days=window)
         type_filter = STATUS_TYPE_PROXY.get(status) if status else None
         # Over-fetch when a status is set, since we then refine by the derived badge.
         over = limit if status is None else limit * 3
+        max_results = max(over, 80)
         async with openalex.make_client() as client:
             raw = await openalex.fetch_recent_works(
                 client,
@@ -52,11 +59,15 @@ async def live_papers(
                 topic_id=topic_id,
                 search=search,
                 type_filter=type_filter,
-                max_results=max(over, 80),
+                max_results=max_results,
             )
+        # Fewer raw works than we asked for => OpenAlex's cursor is exhausted, so no
+        # deeper fetch would help; otherwise more works remain to examine.
+        raw_exhausted = len(raw) < max_results
         papers = [normalized_to_paper(openalex.normalize_work(r)) for r in raw]
         if status:
             papers = [p for p in papers if p.review_status == status]
-        return papers[:limit]
+        has_more = len(papers) > limit or not raw_exhausted
+        return papers[:limit], has_more
 
     return await papers_cache.get_or_set(key, factory)

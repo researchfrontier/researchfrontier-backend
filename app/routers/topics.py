@@ -29,7 +29,7 @@ async def topic_papers(
     if topic is None:
         raise HTTPException(status_code=404, detail="topic not found")
 
-    papers = await live_papers(
+    papers, has_more = await live_papers(
         topic_id=topic_id, window=window, status=status, search=search, limit=limit
     )
     bc = await get_breadcrumb(session, topic.subfield_id)
@@ -40,5 +40,6 @@ async def topic_papers(
         subfield=bc,
         window_days=window,
         total_available=int(stats.works_30d) if stats else 0,
+        has_more=has_more,
         papers=papers,
     )

@@ -107,7 +107,7 @@ async def field_papers(
     """Recent papers in a field — fetched live from OpenAlex (filtered by status and
     optional full-text search), so the list is complete and searchable rather than a
     small stored sample. `total_available` is the field's true count for the window."""
-    papers = await live_papers(
+    papers, has_more = await live_papers(
         subfield_id=subfield_id, window=window, status=status, search=search, limit=limit
     )
     bc = await get_breadcrumb(session, subfield_id)
@@ -119,6 +119,7 @@ async def field_papers(
         reference_date=date.today(),
         total=len(papers),
         total_available=total_available,
+        has_more=has_more,
         papers=papers,
     )
 
