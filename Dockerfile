@@ -13,5 +13,5 @@ COPY app ./app
 
 EXPOSE 8000
 
-# Dev-friendly default. In production drop --reload and set workers via the host.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Bind to $PORT when the host provides one (Render/Fly), else 8000 (local compose).
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

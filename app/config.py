@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Polite-pool contact for OpenAlex/Crossref etiquette. Set to YOUR email only.
     contact_email: str | None = None
 
+    # Force SSL on the DB connection (managed Postgres like Neon/Supabase). Auto-on
+    # when the URL carries ?sslmode=... , so usually you don't need to set this.
+    db_ssl: bool = False
+
     # --- Demo behaviour ---
     # When true, "last N days" windows are measured from the most recent paper in
     # the DB (so the bundled seed always shows content). Set false in production

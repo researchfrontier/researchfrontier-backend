@@ -1,0 +1,23 @@
+# Render Blueprint — deploys the ResearchFrontier API as a free Docker web service.
+# In the Render dashboard: New → Blueprint → connect the researchfrontier-backend
+# repo. Render reads this file and prompts for the three `sync: false` secrets.
+services:
+  - type: web
+    name: researchfrontier-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: RF_CORS_ORIGINS
+        value: https://researchfrontier.github.io
+      - key: RF_DEMO_RELATIVE_DATES
+        value: "false"
+      # Secrets — entered in the Render UI (not stored in git):
+      - key: RF_DATABASE_URL        # Neon asyncpg URL, e.g. postgresql+asyncpg://...neon.tech/db?sslmode=require
+        sync: false
+      - key: RF_OPENALEX_API_KEY    # free key from openalex.org/settings/api
+        sync: false
+      - key: RF_CONTACT_EMAIL       # your contact email (OpenAlex/Crossref etiquette)
+        sync: false
