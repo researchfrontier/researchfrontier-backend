@@ -108,9 +108,15 @@ async def fetch_recent_works(
     ``subfield_oaid`` is the OpenAlex subfield URL/id; we filter on
     ``primary_topic.subfield.id`` so a work lands in exactly one field feed.
     """
-    filters = [f"from_publication_date:{from_date.isoformat()}"]
-    if to_date:
-        filters.append(f"to_publication_date:{to_date.isoformat()}")
+    # Cap the upper bound at today: OpenAlex has many records with erroneous
+    # future publication dates, and sort=publication_date:desc would otherwise let
+    # them dominate the results (and then fall outside every "last N days" window).
+    if to_date is None:
+        to_date = date.today()
+    filters = [
+        f"from_publication_date:{from_date.isoformat()}",
+        f"to_publication_date:{to_date.isoformat()}",
+    ]
     if subfield_oaid:
         filters.append(f"primary_topic.subfield.id:{oaid_to_int(subfield_oaid)}")
     if extra_filter:
