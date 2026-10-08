@@ -31,5 +31,3 @@ class TTLCache:
 
 
 papers_cache = TTLCache(ttl=900.0)
-# Per-field "recent reviews" change slowly; cache them longer than the papers feed.
-reviews_cache = TTLCache(ttl=21600.0)
