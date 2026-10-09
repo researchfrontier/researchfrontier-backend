@@ -13,6 +13,11 @@ permissions:
 jobs:
   sync-taxonomy:
     runs-on: ubuntu-latest
+    # Fail fast instead of the 6h default if a paged OpenAlex pull stalls, and stream
+    # stdout live so progress is visible.
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

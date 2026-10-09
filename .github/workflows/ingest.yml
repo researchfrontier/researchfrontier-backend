@@ -17,9 +17,22 @@ on:
 permissions:
   contents: read
 
+# Serialize ingest runs. ingest is the sole writer of work/work_topic, so letting two
+# runs overlap (e.g. a manual backfill during the daily cron, or the Mon 00:00 + 05:00
+# crons colliding) is what produces the "deadlock detected" contention; queue instead.
+concurrency:
+  group: ingest-papers
+  cancel-in-progress: false
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    # Fail fast instead of burning the 6h default if a step stalls, and stream
+    # Python stdout live so run logs show progress (block-buffered output used to
+    # hide where the job was stuck).
+    timeout-minutes: 90
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,6 +40,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Run ingestion
+        timeout-minutes: 30
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
@@ -34,6 +48,7 @@ jobs:
           RF_DEMO_RELATIVE_DATES: "false"
         run: python -m app.jobs.ingest --days "${{ github.event.inputs.days || '7' }}"
       - name: Sync aggregate stats (true counts; also appends Trends history)
+        timeout-minutes: 20
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
@@ -41,6 +56,7 @@ jobs:
         run: python -m app.jobs.sync_stats
 
       - name: Sync field rankings (most-cited + institutions/countries, round-robin third)
+        timeout-minutes: 20
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
@@ -50,6 +66,7 @@ jobs:
           python -m app.jobs.sync_rankings --limit 84 --offset "$OFFSET"
 
       - name: Seed yearly output curves (monthly, or on a manual run)
+        timeout-minutes: 20
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}

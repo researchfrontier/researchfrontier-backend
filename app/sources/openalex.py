@@ -96,9 +96,16 @@ async def iter_entities(client: httpx.AsyncClient, entity: str) -> AsyncIterator
         )
         resp.raise_for_status()
         payload = resp.json()
-        for row in payload.get("results", []):
+        batch = payload.get("results", [])
+        for row in batch:
             yield row
-        cursor = payload.get("meta", {}).get("next_cursor")
+        next_cursor = payload.get("meta", {}).get("next_cursor")
+        # Same guard as fetch_recent_works: stop on an empty page or a cursor that
+        # didn't advance, so an exhausted result set with a non-null cursor can't
+        # spin this loop forever.
+        if not batch or next_cursor == cursor:
+            break
+        cursor = next_cursor
 
 
 async def fetch_recent_works(
@@ -156,8 +163,15 @@ async def fetch_recent_works(
         resp = await client.get("/works", params=params)
         resp.raise_for_status()
         payload = resp.json()
-        results.extend(payload.get("results", []))
-        cursor = payload.get("meta", {}).get("next_cursor")
+        batch = payload.get("results", [])
+        results.extend(batch)
+        next_cursor = payload.get("meta", {}).get("next_cursor")
+        # Stop if a page came back empty (no progress) or the cursor didn't advance:
+        # OpenAlex can hand back a non-null cursor on an exhausted result set, which
+        # would otherwise spin this loop forever.
+        if not batch or next_cursor == cursor:
+            break
+        cursor = next_cursor
     return results[:max_results]
 
 
