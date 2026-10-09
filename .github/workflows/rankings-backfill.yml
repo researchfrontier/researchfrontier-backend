@@ -1,0 +1,44 @@
+name: rankings-backfill
+
+# Manual helper: run sync_rankings for an arbitrary slice of subfields on demand,
+# WITHOUT disturbing the automatic 3-day round-robin in ingest.yml (that one still
+# computes its offset from the date). Use it to fill the other thirds immediately
+# after first population or a DB reset. Three OpenAlex calls per subfield.
+on:
+  workflow_dispatch:
+    inputs:
+      offset:
+        description: "Subfield offset (0, 84, 168 for the three thirds)"
+        default: "84"
+      limit:
+        description: "How many subfields to process"
+        default: "84"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rankings-backfill
+  cancel-in-progress: false
+
+jobs:
+  rankings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Sync field rankings (manual slice)
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+        run: |
+          python -m app.jobs.sync_rankings \
+            --limit "${{ github.event.inputs.limit || '84' }}" \
+            --offset "${{ github.event.inputs.offset || '84' }}"
