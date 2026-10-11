@@ -17,7 +17,7 @@ from ..schemas import (
 )
 from ..services.papers import stored_papers
 from ..services.serialize import get_breadcrumb, work_to_paper
-from ..services.time_window import reference_date
+from ..services.time_window import MAX_WINDOW_DAYS, reference_date
 
 router = APIRouter(prefix="/api/fields", tags=["fields"])
 
@@ -98,15 +98,15 @@ async def cold_fields(
 @router.get("/{subfield_id}/papers", response_model=PaperList)
 async def field_papers(
     subfield_id: int,
-    window: int = Query(30, ge=1, le=365),
+    window: int = Query(30, ge=1, le=MAX_WINDOW_DAYS),
     status: str | None = Query(None, description="peer_reviewed|preprint|preprint_published|retracted|all"),
     venue: str | None = Query(None, description="journal|conference|book series — primary venue type"),
-    search: str | None = Query(None, description="full-text query"),
+    search: str | None = Query(None, description="title search"),
     limit: int = Query(50, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> PaperList:
     """Recent papers in a field — served from the ingested store (filtered by status,
-    optional venue type, and optional title/abstract search), newest first. Stable and
+    optional venue type, and optional title search), newest first. Stable and
     reproducible across requests. `total_available` is the field's true count for the
     window (from OpenAlex counts), shown for context."""
     ref = await reference_date(session)

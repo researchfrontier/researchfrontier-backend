@@ -10,7 +10,7 @@ from ..models import Topic, TopicStats
 from ..schemas import TopicPapers
 from ..services.papers import stored_papers
 from ..services.serialize import get_breadcrumb
-from ..services.time_window import reference_date
+from ..services.time_window import MAX_WINDOW_DAYS, reference_date
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/topics", tags=["topics"])
 @router.get("/{topic_id}/papers", response_model=TopicPapers)
 async def topic_papers(
     topic_id: int,
-    window: int = Query(30, ge=1, le=365),
+    window: int = Query(30, ge=1, le=MAX_WINDOW_DAYS),
     status: str | None = Query(None, description="peer_reviewed|preprint|...|all"),
     venue: str | None = Query(None, description="journal|conference|book series — primary venue type"),
     search: str | None = Query(None),

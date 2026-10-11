@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Topic, Work
@@ -29,7 +29,7 @@ async def stored_papers(
 ) -> tuple[list[PaperOut], bool]:
     """Return ``(papers[:limit], has_more)`` for a field or topic, from stored works:
     filtered by the recency window, derived review status, primary venue type, and an
-    optional title/abstract search, newest first (citations break ties). ``has_more``
+    optional title search, newest first (citations break ties). ``has_more``
     is true when more than ``limit`` rows match, so the UI's "Load more" can grow the
     page. The same request returns the same rows (stable, citable), unlike a live feed."""
     status = status if status and status != "all" else None
@@ -51,8 +51,7 @@ async def stored_papers(
     if venue:
         q = q.where(Work.primary_source_type == venue)
     if search and search.strip():
-        like = f"%{search.strip()}%"
-        q = q.where(or_(Work.title.ilike(like), Work.abstract.ilike(like)))
+        q = q.where(Work.title.ilike(f"%{search.strip()}%"))
 
     # Fetch one extra row to detect whether a larger page would surface more.
     q = q.order_by(Work.publication_date.desc(), Work.cited_by_count.desc()).limit(limit + 1)

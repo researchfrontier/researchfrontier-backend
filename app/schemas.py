@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 class Author(BaseModel):
     name: str
-    position: str | None = None
 
 
 class Breadcrumb(BaseModel):
@@ -26,22 +25,17 @@ class Breadcrumb(BaseModel):
 class PaperOut(BaseModel):
     id: int
     title: str
-    abstract: str | None = None
     authors: list[Author] = []
     doi: str | None = None
     doi_url: str | None = None
-    published_doi: str | None = None
     publication_date: date | None = None
     cited_by_count: int = 0
     primary_source_name: str | None = None
     primary_source_type: str | None = None
     landing_page_url: str | None = None
-    pdf_url: str | None = None
-    is_oa: bool = False
-    # Peer-review badge (derived, with its evidence)
+    # Peer-review badge (derived)
     review_status: str
     review_confidence: str
-    review_evidence: dict = {}
     primary_topic: str | None = None
 
 
@@ -187,21 +181,6 @@ class TrendFieldDetail(BaseModel):
     most_cited: list[TrendCitedItem] = []
     institutions: list[TrendRankItem] = []
     countries: list[TrendRankItem] = []
-
-
-class TrendSeriesPoint(BaseModel):
-    date: date
-    value: int
-
-
-class TrendSeries(BaseModel):
-    subfield_id: int
-    name: str
-    points: list[TrendSeriesPoint] = []
-
-
-class TrendHistoryOut(BaseModel):
-    series: list[TrendSeries] = []
 
 
 class InstitutionHit(BaseModel):

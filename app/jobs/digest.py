@@ -4,7 +4,8 @@ Run: ``python -m app.jobs.digest --window 3``
 
 For every field with recent activity, assembles one edition for today: the top
 works in the window, counts by badge, and the leading directions. Upserts on
-(subfield_id, edition_date) so re-runs are idempotent.
+(subfield_id, edition_date) so re-runs are idempotent, and drops the editions it
+supersedes (only the latest per field is ever read).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import argparse
 import asyncio
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from ..db import SessionLocal
@@ -105,12 +106,16 @@ async def main() -> None:
         subfields = (
             await session.execute(select(Subfield.id, Subfield.display_name))
         ).all()
-        built = 0
+        built: list[int] = []
         for sid, sname in subfields:
             if await _build_for_subfield(session, sid, sname, ref, args.window):
-                built += 1
+                built.append(sid)
+        if built:
+            await session.execute(
+                delete(Digest).where(Digest.subfield_id.in_(built), Digest.edition_date < ref)
+            )
         await session.commit()
-        print(f"digest complete: {built} editions for {ref.isoformat()}")
+        print(f"digest complete: {len(built)} editions for {ref.isoformat()}")
 
 
 if __name__ == "__main__":

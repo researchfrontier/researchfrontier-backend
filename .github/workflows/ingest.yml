@@ -17,7 +17,7 @@ on:
 permissions:
   contents: read
 
-# Serialize ingest runs. ingest is the sole writer of work/work_topic, so letting two
+# Serialize ingest runs. ingest is the sole writer of work, so letting two
 # runs overlap (e.g. a manual backfill during the daily cron, or the Mon 00:00 + 05:00
 # crons colliding) is what produces the "deadlock detected" contention; queue instead.
 concurrency:
@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Run ingestion
+      - name: Run ingestion (also prunes papers past the 30-day window)
         timeout-minutes: 30
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}

@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..models import Work
 
+# The longest paper window the UI offers (7d / 30d). Older works are never shown, so
+# the ingest job prunes them and the paper endpoints cap ``window`` here.
+MAX_WINDOW_DAYS = 30
+
 
 async def reference_date(session: AsyncSession) -> date:
     """The "today" that date windows are measured back from.

@@ -72,20 +72,6 @@ def parse_date(value: str | None) -> date | None:
         return None
 
 
-def reconstruct_abstract(inverted_index: dict[str, list[int]] | None) -> str | None:
-    """OpenAlex ships abstracts as an inverted index to respect copyright; rebuild it."""
-    if not inverted_index:
-        return None
-    positions: list[tuple[int, str]] = []
-    for word, idxs in inverted_index.items():
-        for i in idxs:
-            positions.append((i, word))
-    if not positions:
-        return None
-    positions.sort()
-    return " ".join(word for _, word in positions)
-
-
 async def iter_entities(client: httpx.AsyncClient, entity: str) -> AsyncIterator[dict[str, Any]]:
     """Page through a list entity: 'domains' | 'fields' | 'subfields' | 'topics'."""
     cursor = "*"
@@ -281,61 +267,30 @@ def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
     """Map a raw OpenAlex work into our normalized shape (+ derived badge)."""
     primary = raw.get("primary_location") or {}
     source = primary.get("source") or {}
-    best_oa = raw.get("best_oa_location") or {}
-    oa = raw.get("open_access") or {}
 
     authors = [
-        {
-            "name": (a.get("author") or {}).get("display_name"),
-            "position": a.get("author_position"),
-        }
+        {"name": (a.get("author") or {}).get("display_name")}
         for a in (raw.get("authorships") or [])
         if (a.get("author") or {}).get("display_name")
     ]
 
-    status, confidence, evidence = compute_badge(raw)
+    status, confidence = compute_badge(raw)
 
     ptopic = raw.get("primary_topic") or {}
-    topics_raw = raw.get("topics") or []
-    topics = []
-    primary_topic_oaid = ptopic.get("id")
-    for t in topics_raw:
-        topics.append(
-            {
-                "topic_oaid": t.get("id"),
-                "display_name": t.get("display_name"),
-                "score": t.get("score", 0.0),
-                "is_primary": t.get("id") == primary_topic_oaid,
-                "subfield_oaid": (t.get("subfield") or {}).get("id"),
-                "keywords": [k.get("display_name") for k in (raw.get("keywords") or [])][:8],
-            }
-        )
 
     return {
         "openalex_id": raw.get("id"),
         "doi": normalize_doi(raw.get("doi")),
-        "published_doi": None,
         "title": raw.get("title") or raw.get("display_name") or "(untitled)",
-        "abstract": reconstruct_abstract(raw.get("abstract_inverted_index")),
         "authors": authors,
         "publication_date": parse_date(raw.get("publication_date")),
         "publication_year": raw.get("publication_year"),
-        "language": raw.get("language"),
         "cited_by_count": raw.get("cited_by_count", 0),
         "primary_source_name": source.get("display_name"),
         "primary_source_type": source.get("type"),
-        "openalex_type": raw.get("type"),
-        "crossref_type": raw.get("type_crossref"),
         "landing_page_url": primary.get("landing_page_url"),
-        "pdf_url": best_oa.get("pdf_url") or primary.get("pdf_url"),
-        "is_oa": bool(oa.get("is_oa")),
-        "is_retracted": bool(raw.get("is_retracted")),
         "review_status": status,
         "review_confidence": confidence,
-        "review_evidence": evidence,
-        "primary_topic_oaid": primary_topic_oaid,
+        "primary_topic_oaid": ptopic.get("id"),
         "primary_subfield_oaid": (ptopic.get("subfield") or {}).get("id"),
-        "primary_field_oaid": (ptopic.get("field") or {}).get("id"),
-        "primary_domain_oaid": (ptopic.get("domain") or {}).get("id"),
-        "topics": topics,
     }

@@ -7,6 +7,7 @@ Fills:
   - subfield_stats: true recent-work counts per field (7d / 30d / previous 30d),
     powering the hot-fields ranking, momentum, and the "N of total" labels.
   - topic_stats: true recent-work counts per topic, powering real "directions".
+  - subfield_stats_history: today's 30d count per field, the Trends momentum.
 
 Cost: a few subfield-level group_by calls + one group_by per subfield for its
 topics (~250 calls). Cheap on the OpenAlex credit budget; runs in the daily cron.
@@ -26,7 +27,6 @@ from ..models import (
     SubfieldStats,
     SubfieldStatsHistory,
     TopicStats,
-    TopicStatsHistory,
 )
 from ..sources import openalex
 
@@ -99,36 +99,21 @@ async def main() -> None:
             await session.execute(stmt)
         await session.commit()
 
-        # 4) Append today's snapshot into the append-only history tables (Trends
+        # 4) Append today's snapshot into the append-only history table (Trends
         # momentum accrues forward). Idempotent: a same-day rerun changes nothing.
         sf_hist = (
             insert(SubfieldStatsHistory)
             .from_select(
-                ["subfield_id", "snapshot_date", "works_7d", "works_30d", "works_prev_30d"],
+                ["subfield_id", "snapshot_date", "works_30d"],
                 select(
                     SubfieldStats.subfield_id,
                     func.current_date().label("snapshot_date"),
-                    SubfieldStats.works_7d,
                     SubfieldStats.works_30d,
-                    SubfieldStats.works_prev_30d,
                 ),
             )
             .on_conflict_do_nothing(index_elements=["subfield_id", "snapshot_date"])
         )
         await session.execute(sf_hist)
-        tp_hist = (
-            insert(TopicStatsHistory)
-            .from_select(
-                ["topic_id", "snapshot_date", "works_30d"],
-                select(
-                    TopicStats.topic_id,
-                    func.current_date().label("snapshot_date"),
-                    TopicStats.works_30d,
-                ),
-            )
-            .on_conflict_do_nothing(index_elements=["topic_id", "snapshot_date"])
-        )
-        await session.execute(tp_hist)
         await session.commit()
         print("stats sync complete (history appended)")
 
