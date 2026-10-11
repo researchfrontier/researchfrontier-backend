@@ -14,10 +14,10 @@ feeds, emerging directions, trends and digests. The frontend's typed client
 | GET | `/api/taxonomy/subfields/{id}` | breadcrumb for a field |
 | GET | `/api/fields/hot?limit=12` | hottest fields, ranked by recent output + momentum |
 | GET | `/api/fields/cold?limit=12` | quietest fields by recent output |
-| GET | `/api/fields/{id}/papers?window=30&status=&venue=&search=` | recent papers in a field (window ≤ 30 days, title search), with badges + DOI |
+| GET | `/api/fields/{id}/papers?window=30&status=&venue=&search=&limit=&offset=` | recent papers in a field (window ≤ 30 days, title search, paged), with badges + DOI |
 | GET | `/api/fields/{id}/directions` | topic breakdown — where the field is moving |
 | GET | `/api/fields/{id}/digest` | the Mon/Wed/Fri in-app brief |
-| GET | `/api/topics/{id}/papers?window=30&status=&venue=&search=` | recent papers in a direction (same filters) |
+| GET | `/api/topics/{id}/papers?window=30&status=&venue=&search=&limit=&offset=` | recent papers in a direction (same filters) |
 | GET | `/api/papers/{id}` | a single paper |
 | GET | `/api/trends/hot?limit=12` | Trends: hottest fields with their yearly output curve |
 | GET | `/api/trends/fields/{id}` | Trends: one field's yearly output, momentum, top directions, most-cited papers, most-active institutions/countries |
@@ -40,10 +40,14 @@ confidence level.
 ## Stored papers
 
 Paper lists are served from Postgres (the `work` table), never live from
-OpenAlex. Only what the lists render is stored — title, the byline's first 4
-authors, date, venue, citations, DOI (or landing page when there is none) and the
-badge; no abstracts. The ingest job prunes works older than 30 days, the longest
-window the UI offers, so the database stays bounded.
+OpenAlex. The store holds **every** paper OpenAlex lists for each field in the
+last 30 days, not a sample: the daily ingest re-reads the last 7 days in full,
+and a weekly sweep (`papers-sweep` workflow) re-reads all 30, catching works
+OpenAlex indexes late (the free plan can't filter on the date a work was added).
+Only what the lists render is stored — title, the byline's first 4 authors, date,
+venue, citations, DOI (or landing page when there is none) and the badge; no
+abstracts. The ingest job prunes works older than 30 days, the longest window the
+UI offers, so the database stays bounded.
 
 ## Run
 
@@ -66,7 +70,7 @@ uvicorn app.main:app --reload
 
 ```bash
 python -m app.jobs.sync_taxonomy        # pull the full OpenAlex taxonomy (source of truth)
-python -m app.jobs.ingest --days 7      # pull recent papers per field, prune those past 30 days
+python -m app.jobs.ingest --days 7      # every paper of the last 7 days per field (--days 30: weekly sweep); prunes past 30 days
 python -m app.jobs.sync_stats           # true 30d counts per field/topic + Trends momentum snapshot
 python -m app.jobs.sync_rankings        # Trends: most-cited papers + most-active institutions/countries
 python -m app.jobs.sync_year_counts     # Trends: yearly output curve per field

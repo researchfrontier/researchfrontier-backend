@@ -1,6 +1,7 @@
 name: ingest-papers
 
-# Pulls recent papers into the database on a schedule.
+# Pulls every paper of the last 7 days into the database, daily (papers-sweep.yml
+# re-reads the full 30-day window weekly, for works OpenAlex indexes late).
 # GitHub Actions cron can be delayed under load (fine for ingestion) and a
 # schedule-only repo auto-disables after 60 days of inactivity — workflow_dispatch
 # and the weekly keepalive below avoid that.
@@ -20,6 +21,7 @@ permissions:
 # Serialize ingest runs. ingest is the sole writer of work, so letting two
 # runs overlap (e.g. a manual backfill during the daily cron, or the Mon 00:00 + 05:00
 # crons colliding) is what produces the "deadlock detected" contention; queue instead.
+# papers-sweep.yml shares this group for the same reason.
 concurrency:
   group: ingest-papers
   cancel-in-progress: false
@@ -30,7 +32,7 @@ jobs:
     # Fail fast instead of burning the 6h default if a step stalls, and stream
     # Python stdout live so run logs show progress (block-buffered output used to
     # hide where the job was stuck).
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       PYTHONUNBUFFERED: "1"
     steps:
@@ -39,8 +41,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Run ingestion (also prunes papers past the 30-day window)
-        timeout-minutes: 30
+      - name: Run ingestion (every paper of the window; also prunes past 30 days)
+        timeout-minutes: 60
         env:
           RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
           RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}

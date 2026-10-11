@@ -1,0 +1,43 @@
+name: papers-sweep
+
+# Weekly pass over the full 30-day window the UI shows. The daily ingest re-reads only
+# the last 7 days, but OpenAlex indexes many works days or weeks after their
+# publication date (and dates month-only journal issues to the 1st), and the free plan
+# can't filter on the date a work was added; this catches those late arrivals. Run it
+# by hand to backfill after a reset. ~4,000 OpenAlex list calls and ~2h per run.
+on:
+  schedule:
+    - cron: "0 1 * * 0"      # Sunday 01:00 UTC, clear of the daily 05:00 ingest
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Lookback window in days"
+        default: "30"
+
+permissions:
+  contents: read
+
+# Same group as ingest-papers: both write `work`, so runs queue instead of overlapping.
+concurrency:
+  group: ingest-papers
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Ingest every paper of the window (also prunes past 30 days)
+        env:
+          RF_DATABASE_URL: ${{ secrets.RF_DATABASE_URL }}
+          RF_OPENALEX_API_KEY: ${{ secrets.RF_OPENALEX_API_KEY }}
+          RF_CONTACT_EMAIL: ${{ secrets.RF_CONTACT_EMAIL }}
+          RF_DEMO_RELATIVE_DATES: "false"
+        run: python -m app.jobs.ingest --days "${{ github.event.inputs.days || '30' }}"

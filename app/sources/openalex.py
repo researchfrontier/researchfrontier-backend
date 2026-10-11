@@ -26,6 +26,13 @@ SCHOLARLY_TYPES = (
     "article|preprint|review|conference-paper|book-chapter|book|dissertation|report|letter"
 )
 
+# Only the work fields normalize_work / compute_badge read. Skipping the rest (abstract
+# index, references, concepts...) cuts each page to about a third.
+WORK_FIELDS = (
+    "id,doi,title,display_name,publication_date,publication_year,cited_by_count,"
+    "authorships,primary_location,locations,type,indexed_in,is_retracted,primary_topic"
+)
+
 
 def _auth_params() -> dict[str, str]:
     params: dict[str, str] = {}
@@ -86,7 +93,7 @@ async def iter_entities(client: httpx.AsyncClient, entity: str) -> AsyncIterator
         for row in batch:
             yield row
         next_cursor = payload.get("meta", {}).get("next_cursor")
-        # Same guard as fetch_recent_works: stop on an empty page or a cursor that
+        # Same guard as iter_recent_work_pages: stop on an empty page or a cursor that
         # didn't advance, so an exhausted result set with a non-null cursor can't
         # spin this loop forever.
         if not batch or next_cursor == cursor:
@@ -94,7 +101,7 @@ async def iter_entities(client: httpx.AsyncClient, entity: str) -> AsyncIterator
         cursor = next_cursor
 
 
-async def fetch_recent_works(
+async def iter_recent_work_pages(
     client: httpx.AsyncClient,
     *,
     from_date: date,
@@ -106,10 +113,11 @@ async def fetch_recent_works(
     type_filter: str | None = None,
     extra_filter: str | None = None,
     sort: str = "publication_date:desc",
-    max_results: int = 200,
-) -> list[dict[str, Any]]:
-    """Fetch works published in a date range, restricted to a subfield or topic,
-    optionally full-text searched and narrowed to specific work types.
+    max_results: int | None = None,
+) -> AsyncIterator[list[dict[str, Any]]]:
+    """Yield pages (up to 200 works each) of works published in a date range,
+    restricted to a subfield or topic, optionally full-text searched and narrowed to
+    specific work types. ``max_results=None`` pages through every match.
 
     We filter on ``primary_topic.subfield.id`` / ``primary_topic.id`` so a work
     lands in exactly one field/topic feed. ``type_filter`` overrides the default
@@ -134,14 +142,15 @@ async def fetch_recent_works(
     if extra_filter:
         filters.append(extra_filter)
 
-    results: list[dict[str, Any]] = []
+    fetched = 0
     cursor = "*"
-    while cursor and len(results) < max_results:
+    while cursor and (max_results is None or fetched < max_results):
         params = {
             "filter": ",".join(filters),
             "sort": sort,
-            "per-page": min(200, max_results - len(results)),
+            "per-page": 200 if max_results is None else min(200, max_results - fetched),
             "cursor": cursor,
+            "select": WORK_FIELDS,
             **_auth_params(),
         }
         if search:
@@ -150,7 +159,11 @@ async def fetch_recent_works(
         resp.raise_for_status()
         payload = resp.json()
         batch = payload.get("results", [])
-        results.extend(batch)
+        if max_results is not None:
+            batch = batch[: max_results - fetched]
+        if batch:
+            yield batch
+        fetched += len(batch)
         next_cursor = payload.get("meta", {}).get("next_cursor")
         # Stop if a page came back empty (no progress) or the cursor didn't advance:
         # OpenAlex can hand back a non-null cursor on an exhausted result set, which
@@ -158,7 +171,14 @@ async def fetch_recent_works(
         if not batch or next_cursor == cursor:
             break
         cursor = next_cursor
-    return results[:max_results]
+
+
+async def fetch_recent_works(client: httpx.AsyncClient, **kwargs: Any) -> list[dict[str, Any]]:
+    """``iter_recent_work_pages`` collected into one list — for small, capped pulls."""
+    results: list[dict[str, Any]] = []
+    async for page in iter_recent_work_pages(client, **kwargs):
+        results.extend(page)
+    return results
 
 
 async def group_counts(

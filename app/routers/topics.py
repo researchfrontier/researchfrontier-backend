@@ -23,6 +23,7 @@ async def topic_papers(
     venue: str | None = Query(None, description="journal|conference|book series — primary venue type"),
     search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, description="rows to skip (Load more)"),
     session: AsyncSession = Depends(get_session),
 ) -> TopicPapers:
     """Recent papers for a single topic (the directions drill-down), served from the
@@ -40,6 +41,7 @@ async def topic_papers(
         venue=venue,
         search=search,
         limit=limit,
+        offset=offset,
         ref=ref,
     )
     bc = await get_breadcrumb(session, topic.subfield_id)

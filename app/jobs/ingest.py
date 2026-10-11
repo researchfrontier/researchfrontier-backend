@@ -1,21 +1,24 @@
 """Ingest recent papers from OpenAlex into the DB.
 
-Run: ``python -m app.jobs.ingest --days 7 --max-per-field 100``
+Run: ``python -m app.jobs.ingest --days 7`` (daily) / ``--days 30`` (weekly sweep)
 
-For each research field (OpenAlex subfield) already in the taxonomy, pulls works
-published in the last N days, normalizes them, derives the peer-review badge, and
-upserts (idempotently, keyed on OpenAlex id or DOI). Later this is scoped to the
-subfields users actually follow; for the slice it sweeps the known taxonomy.
-Works past the longest window the UI shows are then pruned, so the store stays
-bounded.
+For each research field (OpenAlex subfield) already in the taxonomy, pulls EVERY
+work published in the last N days (all pages, so the store holds the field's
+complete recent output, not a sample), normalizes them, derives the peer-review
+badge, and upserts (idempotently, keyed on OpenAlex id or DOI). OpenAlex indexes
+many works days or weeks after their publication date, and the free plan can't
+filter on the date a work was added, so a daily 7-day pass is backed by a weekly
+30-day sweep. Works past the longest window the UI shows are then pruned, so the
+store stays bounded.
 
-Writes are **batched per subfield**: a single bulk ``INSERT ... ON CONFLICT DO
-UPDATE`` for the works. The earlier row-at-a-time path issued ~hundreds of
-sequential statements per subfield and was latency-bound against the remote (Neon)
-database — sweeping all 252 subfields could not finish inside the CI time budget
-(it burned the 6h job limit and was killed). Batching collapses that to a handful
-of round-trips per subfield. A per-row fallback preserves the "one bad row doesn't
-sink the batch" guarantee, and transient deadlocks are retried.
+Writes are **batched per page** (up to 200 works): a single bulk ``INSERT ... ON
+CONFLICT DO UPDATE`` that skips rows which came back unchanged. The earlier
+row-at-a-time path issued ~hundreds of sequential statements per subfield and was
+latency-bound against the remote (Neon) database — sweeping all 252 subfields
+could not finish inside the CI time budget (it burned the 6h job limit and was
+killed). Batching collapses that to one round-trip per page. A per-row fallback
+preserves the "one bad row doesn't sink the batch" guarantee, and transient
+deadlocks are retried.
 """
 
 from __future__ import annotations
@@ -107,7 +110,8 @@ def _drop_doi_conflicts(rows: list[dict], existing: dict[str, str]) -> tuple[lis
 
 async def _bulk_upsert(session, maps, recs: list[dict]) -> int:
     """Bulk-upsert the works carrying an OpenAlex id (all of them, in practice) in a
-    handful of statements. Returns the number of works."""
+    handful of statements. Returns the number of works inserted or changed (rows
+    that came back identical are left untouched)."""
     # Dedup within the batch on the conflict key: ``ON CONFLICT DO UPDATE`` may not
     # touch the same openalex_id twice in one statement. Keep the last occurrence.
     by_oaid: dict[str, dict] = {}
@@ -138,6 +142,11 @@ async def _bulk_upsert(session, maps, recs: list[dict]) -> int:
     stmt = stmt.on_conflict_do_update(
         index_elements=[Work.openalex_id],
         set_={c: stmt.excluded[c] for c in _WORK_COLS},
+        # The 7/30-day lookbacks mostly re-read known works: rewriting identical rows
+        # would only leave dead tuples behind (table bloat on a size-capped database).
+        where=or_(
+            *(getattr(Work, c).is_distinct_from(stmt.excluded[c]) for c in _WORK_COLS)
+        ),
     ).returning(Work.id)
     return len((await session.execute(stmt)).all())
 
@@ -186,10 +195,10 @@ def _is_retryable(exc: BaseException) -> bool:
     return sqlstate in _RETRY_SQLSTATES
 
 
-async def _write_subfield(session, maps, raws: list[dict]) -> int:
-    """Persist one subfield's works. Fast bulk path with a deadlock retry; on a
-    non-transient write error fall back to the resilient row-at-a-time path so a
-    single bad row is skipped, not the whole subfield. The fallback is logged so a
+async def _write_page(session, maps, raws: list[dict]) -> int:
+    """Persist one page of a subfield's works. Fast bulk path with a deadlock retry;
+    on a non-transient write error fall back to the resilient row-at-a-time path so
+    a single bad row is skipped, not the whole page. The fallback is logged so a
     drift back toward the old slow behaviour is visible before the timeout fires."""
     recs = [openalex.normalize_work(r) for r in raws]
 
@@ -240,7 +249,9 @@ async def _prune_expired(session) -> tuple[int, int]:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest recent papers.")
     parser.add_argument("--days", type=int, default=7)
-    parser.add_argument("--max-per-field", type=int, default=100)
+    parser.add_argument(
+        "--max-per-field", type=int, default=None, help="cap per field (default: every work)"
+    )
     parser.add_argument("--subfield", type=int, default=None, help="limit to one subfield id")
     args = parser.parse_args()
 
@@ -255,27 +266,27 @@ async def main() -> None:
 
         total = 0
         for sid, soaid in subfields:
+            fetched = written = 0
             try:
-                raw = await openalex.fetch_recent_works(
+                # Page by page, so even the largest field never sits in memory at once;
+                # each page is committed, so a failure keeps what was already written.
+                async for page in openalex.iter_recent_work_pages(
                     client,
                     from_date=from_date,
                     subfield_oaid=soaid,
                     max_results=args.max_per_field,
-                )
-            except Exception as exc:  # noqa: BLE001 — keep sweeping other fields
-                print(f"[warn] subfield {sid} fetch failed: {exc}", flush=True)
-                continue
-
-            try:
-                count = await _write_subfield(session, maps, raw)
+                ):
+                    fetched += len(page)
+                    written += await _write_page(session, maps, page)
             except Exception as exc:  # noqa: BLE001 — never let one subfield sink the sweep
                 await session.rollback()
-                print(f"[warn] subfield {sid} write failed: {exc}", flush=True)
+                print(f"[warn] subfield {sid} stopped after {fetched} works: {exc}", flush=True)
+                total += written
                 continue
 
-            total += count
-            print(f"subfield {sid}: fetched {len(raw)}, upserted {count}", flush=True)
-        print(f"ingest complete: {total} works upserted", flush=True)
+            total += written
+            print(f"subfield {sid}: fetched {fetched}, new or changed {written}", flush=True)
+        print(f"ingest complete: {total} works new or changed", flush=True)
 
         works, digests = await _prune_expired(session)
         print(

@@ -25,13 +25,15 @@ async def stored_papers(
     venue: str | None = None,
     search: str | None = None,
     limit: int = 50,
+    offset: int = 0,
     ref: date | None = None,
 ) -> tuple[list[PaperOut], bool]:
-    """Return ``(papers[:limit], has_more)`` for a field or topic, from stored works:
-    filtered by the recency window, derived review status, primary venue type, and an
-    optional title search, newest first (citations break ties). ``has_more``
-    is true when more than ``limit`` rows match, so the UI's "Load more" can grow the
-    page. The same request returns the same rows (stable, citable), unlike a live feed."""
+    """Return ``(papers[offset:offset + limit], has_more)`` for a field or topic, from
+    stored works: filtered by the recency window, derived review status, primary venue
+    type, and an optional title search, newest first (citations, then id, break ties
+    so pages never overlap). ``has_more`` is true when rows follow this page, so the
+    UI's "Load more" can ask for the next one. The same request returns the same rows
+    (stable, citable), unlike a live feed."""
     status = status if status and status != "all" else None
     venue = venue if venue and venue != "all" else None
     ref = ref or date.today()
@@ -53,8 +55,12 @@ async def stored_papers(
     if search and search.strip():
         q = q.where(Work.title.ilike(f"%{search.strip()}%"))
 
-    # Fetch one extra row to detect whether a larger page would surface more.
-    q = q.order_by(Work.publication_date.desc(), Work.cited_by_count.desc()).limit(limit + 1)
+    # Fetch one extra row to detect whether another page follows.
+    q = (
+        q.order_by(Work.publication_date.desc(), Work.cited_by_count.desc(), Work.id.desc())
+        .offset(offset)
+        .limit(limit + 1)
+    )
     rows = (await session.execute(q)).all()
     has_more = len(rows) > limit
     papers = [work_to_paper(w, tname) for w, tname in rows[:limit]]
