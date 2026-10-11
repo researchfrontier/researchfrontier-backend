@@ -255,7 +255,9 @@ async def main() -> None:
     parser.add_argument("--subfield", type=int, default=None, help="limit to one subfield id")
     args = parser.parse_args()
 
-    from_date = date.today() - timedelta(days=args.days)
+    # The last N days including today, the same span as the UI's window (publication
+    # date > today - N): starting a day earlier only fetches works the prune then drops.
+    from_date = date.today() - timedelta(days=args.days - 1)
 
     async with openalex.make_client() as client, SessionLocal() as session:
         maps = await _load_maps(session)
